@@ -52,3 +52,12 @@ coverage.xml
 # Sphinx documentation
 docs/_build/
 
+# PyCharm
+.idea/
+
+# Spyder
+.spyderworkspace
+.spyderproject
+
+# Ipython Notebook
+.ipynb_checkpoints
