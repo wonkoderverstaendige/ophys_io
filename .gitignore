@@ -61,3 +61,6 @@ docs/_build/
 
 # Ipython Notebook
 .ipynb_checkpoints
+
+# Project specifics
+*.dat
