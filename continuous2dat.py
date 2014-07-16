@@ -20,60 +20,122 @@ NUM_SAMPLES = 1024  # number of samples per record
 SIZE_RECORD = 2070  # total size of record (2x1024 B samples + record header)
 REC_MARKER = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 255], dtype=np.uint8)
 
+# data type of .continuous open ephys 0.2x file format header
+HEADER_DT = np.dtype([('Header', 'S%d' % SIZE_HEADER)])
 
-def gather_files(input_directory, channels, proc_node):
-    """Return list of paths to valid input files for the input directory."""
-    #TODO: Handling non-existing items in file list (i.e. directories named like .continuous files)
-
-    base_name = os.path.join(input_directory, '{proc_node:d}_CH{channel:d}.continuous')
-    file_names = [base_name.format(proc_node=proc_node, channel=chan) for chan in channels]
-    for f in file_names:
-        #print 'Is {file} an existing file? {existence}'.format(file=f, existence='YES' if os.path.isfile(f) else 'NO!')
-        assert os.path.isfile(f)
-
-    # all input files in a single directory should have equal length
-    file_sizes = [os.path.getsize(fname) for fname in file_names]
-    assert len(set(file_sizes)) == 1
-
-    return file_names, file_sizes[0]
+# data type of individual records, n Bytes              # (2048 + 22) Byte = 2070 Byte total
+DATA_DT = np.dtype([('timestamp', np.int64),            # 8 Byte
+                    ('n_samples', np.uint16),           # 2 Byte
+                    ('rec_num', np.uint16),             # 2 Byte
+                    ('samples', ('>i2', NUM_SAMPLES)),  # 2 Byte each x 1024; note endian type
+                    ('rec_mark', (np.uint8, 10))])      # 10 Byte
 
 
-def read_header(filename, size_header=SIZE_HEADER):
-    """Return dict with .continuous file header content."""
-    # TODO: Compare headers, should be identical except for channel
+class ContinuousReader(object):
+    def __init__(self, file_path, *args, **kwargs):
+        self.file_path = os.path.abspath(file_path) 
+        assert os.path.isfile(self.file_path)
+        self.file_size = os.path.getsize(self.file_path)
+        
+        self.chunk_size = None
+        self.bytes_read = None
+        self.file_size = None
 
-    # 1 kiB header string data type
-    header_dt = np.dtype([('Header', 'S%d' % size_header)])
-    header = read_segment(filename, offset=0, count=1, dtype=header_dt)
+        self.header = None
+    
+        self.buffer = None
+        
+        self.header_dt = HEADER_DT 
+        self.data_dt = DATA_DT 
 
-    # Stand back! I know regex!
-    # Annoyingly, there is a newline character missing in the header (version/header_bytes)
-    regex = "header\.([\d\w\.\s]{1,}).=.\'*([^\;\']{1,})\'*"
-    header_str = str(header[0][0]).rstrip(' ')
-    header_dict = {group[0]: group[1] for group in re.compile(regex).findall(header_str)}
-    for key in ['bitVolts', 'sampleRate']:
-        header_dict[key] = float(header_dict[key])
-    for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
-        header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
+        def read_header(self):
+            pass
 
-    return header_dict
+        def read_chunk(self):
+            pass
 
+        def check_data(self):
+            pass
 
-def read_records(filename, record_offset=0, record_count=10000,
-                 size_header=SIZE_HEADER, num_samples=NUM_SAMPLES, size_record=SIZE_RECORD):
-
-    # data type of individual records, n Bytes              # (2048 + 22) Byte = 2070 Byte total
-    data_dt = np.dtype([('timestamp', np.int64),            # 8 Byte
-                        ('n_samples', np.uint16),           # 2 Byte
-                        ('rec_num', np.uint16),             # 2 Byte
-                        ('samples', ('>i2', num_samples)),  # 2 Byte each x 1024; note endian type
-                        ('rec_mark', (np.uint8, 10))])      # 10 Byte
-
-    return read_segment(filename, offset=size_header + record_offset*size_record, count=record_count, dtype=data_dt)
+        def read_segment(self):
+            pass
 
 
-def read_segment(filename, offset, count, dtype):
-    """Read segment of a file from [offset] for [count]x[dtype]"""
+    class SessionReader(object):
+        def __init__(self, *args, **kwargs):
+            self.input_directory = None
+            assert os.path.isdir(os.path.abspath(self.input_directory))
+            self.buffer = None
+            self.headers = None
+            self.files = None
+            self.channels = None
+            self.proc_node = None
+
+        def stack_files(self):
+            pass
+
+        def gather_files(self):
+            base_name = os.path.join(self.input_directory, '{proc_node:d}_CH{channel:d}.continuous')
+            file_names = [base_name.format(proc_node=self.proc_node, channel=chan) for chan in self.channels]
+            for f in file_names:
+                #print 'Is {file} an existing file? {existence}'.format(file=f, existence='YES' if os.path.isfile(f) else 'NO!')
+                assert os.path.isfile(f)
+        
+            # all input files in a single directory should have equal length
+            file_sizes = [os.path.getsize(fname) for fname in file_names]
+            assert len(set(file_sizes)) == 1
+        
+            return file_names, file_sizes[0]
+        
+
+
+    def gather_files(input_directory, channels, proc_node):
+        """Return list of paths to valid input files for the input directory."""
+        #TODO: Handling non-existing items in file list (i.e. directories named like .continuous files)
+
+        base_name = os.path.join(input_directory, '{proc_node:d}_CH{channel:d}.continuous')
+        file_names = [base_name.format(proc_node=proc_node, channel=chan) for chan in channels]
+        for f in file_names:
+            #print 'Is {file} an existing file? {existence}'.format(file=f, existence='YES' if os.path.isfile(f) else 'NO!')
+            assert os.path.isfile(f)
+
+        # all input files in a single directory should have equal length
+        file_sizes = [os.path.getsize(fname) for fname in file_names]
+        assert len(set(file_sizes)) == 1
+
+        return file_names, file_sizes[0]
+
+
+    def read_header(filename, size_header=SIZE_HEADER):
+        """Return dict with .continuous file header content."""
+        # TODO: Compare headers, should be identical except for channel
+
+        # 1 kiB header string data type
+        header_dt = HEADER_DT
+        header = read_segment(filename, offset=0, count=1, dtype=header_dt)
+
+        # Stand back! I know regex!
+        # Annoyingly, there is a newline character missing in the header (version/header_bytes)
+        regex = "header\.([\d\w\.\s]{1,}).=.\'*([^\;\']{1,})\'*"
+        header_str = str(header[0][0]).rstrip(' ')
+        header_dict = {group[0]: group[1] for group in re.compile(regex).findall(header_str)}
+        for key in ['bitVolts', 'sampleRate']:
+            header_dict[key] = float(header_dict[key])
+        for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
+            header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
+
+        return header_dict
+
+
+    def read_records(filename, record_offset=0, record_count=10000,
+                    size_header=SIZE_HEADER, num_samples=NUM_SAMPLES, size_record=SIZE_RECORD):
+
+        data_dt = DATA_DT
+        return read_segment(filename, offset=size_header + record_offset*size_record, count=record_count, dtype=data_dt)
+
+
+    def read_segment(filename, offset, count, dtype):
+        """Read segment of a file from [offset] for [count]x[dtype]"""
     # TODO: Use alternative reading method when filename is a file id instead of filename
         # alternative which moves file pointer
         #fid = open(filename, 'rb')
