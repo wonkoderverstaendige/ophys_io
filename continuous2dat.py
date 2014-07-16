@@ -11,6 +11,7 @@ from __future__ import division
 import os
 import re
 import numpy as np
+import time
 from collections import Iterable
 
 
@@ -20,24 +21,21 @@ SIZE_RECORD = 2070  # total size of record (2x1024 B samples + record header)
 REC_MARKER = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 255], dtype=np.uint8)
 
 
-class SessionReader(object):
-    def __init__(self, target, channels=64, proc_node=100):
-        self.channels = channels if channels is Iterable else range(channels)
-        self.files = {set_id: files for set_id, files in enumerate(target)}
-
-
-def gather_files(input_directories, channels, proc_node):
-    """Return list of paths to valid input files from list of input directories."""
+def gather_files(input_directory, channels, proc_node):
+    """Return list of paths to valid input files for the input directory."""
     #TODO: Handling non-existing items in file list (i.e. directories named like .continuous files)
 
-    base_names = [os.path.join(path, '{proc_node:d}_CH{channel:d}.continuous') for path in input_directories]
-    filenames = [fname_base.format(proc_node=proc_node, channel=chan) for chan in channels for fname_base in base_names]
-
-    for f in filenames:
-        print 'Is {file} an existing file? {existance}'.format(file=f, existance='YES' if os.path.isfile(f) else 'NO!')
+    base_name = os.path.join(input_directory, '{proc_node:d}_CH{channel:d}.continuous')
+    file_names = [base_name.format(proc_node=proc_node, channel=chan) for chan in channels]
+    for f in file_names:
+        #print 'Is {file} an existing file? {existence}'.format(file=f, existence='YES' if os.path.isfile(f) else 'NO!')
         assert os.path.isfile(f)
 
-    return filenames
+    # all input files in a single directory should have equal length
+    file_sizes = [os.path.getsize(fname) for fname in file_names]
+    assert len(set(file_sizes)) == 1
+
+    return file_names, file_sizes[0]
 
 
 def read_header(filename, size_header=SIZE_HEADER):
@@ -110,45 +108,111 @@ def check_data(data):
     print 'Number recording: ', data['rec_num'][0]
 
 
-def data_to_buffer(file_path, channels, count=1000, proc_node=100, buf=None, size_record=SIZE_RECORD):
+def check_inputs(input_directories):
+    """Check input directories for:
+    - existence of all required files
+    - matching files in all input directories
+    - equal size of all files in a single directory
+    - matching sampling rates
+    - matching file size given record and header sizes
+    - check for trailing zeros (check last for all 0, check at 2*distance each, then half distance to slow down)
+
+    Args:
+        List of input directories
+
+    Returns:
+        True if correct, False if errors occurred
+    """
+    # TODO: You know... do stuff.
+    pass
+
+
+def data_to_buffer(file_paths, count=1000, buf=None, size_record=SIZE_RECORD):
     """Read [count] records from [proc_node] file at [filepath] into a buffer."""
     assert channels is Iterable
     
     # temporary storage
     buf = buf if buf is not None else np.zeros((len(channels), count * size_record), dtype='>i2')
 
-    # load chunk of data from all channels
-    # for n in channels:
-    #     filename = file_path+base_end.format(proc_node=proc_node, channel=n+1)
-    #     # channel offset is clunky shortcut for plotting
-    #     if channel_offset:
-    #         buf[n] = read_records(filename, count=count)['samples'].ravel() + channel_offset * (n-32)
-    #     else:
-    #         buf[n] = read_records(filename, count=count)['samples'].ravel()
-
     return buf
 
 
-def folders_to_dat(in_dir, outfile, channels, proc_node=100, *args, **kwargs):
-    """Given list of input directories [in_dir] will write out .continuous files for channels in [channels] iterable
+def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_size=100000,
+                  size_record=SIZE_RECORD, size_header=SIZE_HEADER, *args, **kwargs):
+    """Given an input directory [in_dir] will write or append .continuous files for channels in [channels] iterable
     of an open ephys [proc_node] into single [outfile] .dat file.
+    Data is transferred in batches of [chunk_size] records per channel.
     """
-    #TODO: out_log file should be ast.eval()-uable (i.e. exported as dict)
+    # TODO: out_log file should be ast.eval()-uable (i.e. exported as dict)
+    # TODO: use logging module for event logging?
 
-    files = gather_files(in_dir, channels, proc_node)
-    log_string = '{in_dir}:\nChannels: {channels}, proc_node: {proc_node}\n\n'
+    start_t = time.time()
+
+    log__string_input = '======== {in_dir} ========\n' + \
+                        'Channels: {channels}, proc_node: {proc_node}, write mode: {file_mode}\n\n'
+    log_string_item = '--> Reading "{filename}"\nHeader = {header_str}\n\n'
+    log_string_chunk = '  ~ Reading {count} records ({start}:{end}) from "{filename}"\n'
+    file_mode = 'a' if append else 'w'
+
+    file_paths, file_sizes = gather_files(in_dir, channels, proc_node)
+    assert len(file_paths) == len(channels)
+
+    # preallocate temporary storage
+    buf = np.zeros((len(channels), chunk_size*size_record), dtype='>i2')
+
+    # calculate number of records from file size
+    # there should be an integer multiple of records, i.e. not leftover bytes!
+    assert not (file_sizes-size_header) % size_record
+    num_records = (file_sizes-size_header) // size_record
+    records_left = num_records
+    bytes_written = 0
+
     try:
-        with open(outfile, 'wb') as out_fid_dat, open(outfile+'.log', 'w') as out_fid_log:
-            out_fid_log.write(log_string.format(in_dir=in_dir, channels=str(channels), proc_node=proc_node))
+        with open(outfile, file_mode+'b') as out_fid_dat, open(outfile+'.log', file_mode) as out_fid_log:
+            out_fid_log.write(log__string_input.format(in_dir=in_dir, channels=str(channels),
+                                                       proc_node=proc_node, file_mode=file_mode))
+            for fname in file_paths:
+                out_fid_log.write(log_string_item.format(filename=fname, header_str=str(read_header(fname))))
 
-            for f in files:
-                out_fid_log.write(f+':\n'+str(read_header(f))+'\n\n')
-                #out_fid_dat.write()
+            # loop over all records, in chunk sizes
+            while records_left:
+                count = min(records_left, chunk_size)
+                offset = num_records - records_left
+
+                # load chunk of data from all channels
+                for n, fname in enumerate(file_paths):
+                    buf[n, 0:count*NUM_SAMPLES] = read_records(fname, record_count=count,
+                                                               record_offset=offset)['samples'].ravel()
+                    out_fid_log.write(log_string_chunk.format(filename=fname, count=count,
+                                                              start=offset, end=offset+count-1))
+
+                # write chunk of interleaved data
+                if count == chunk_size:
+                    buf.transpose().tofile(out_fid_dat)
+                    #bytes_written += buf.nbytes
+                else:
+                    # We don't want to write the trailing zeros on the last chunk
+                    buf[:, 0:count*NUM_SAMPLES].transpose().tofile(out_fid_dat)
+                    out_fid_log.write('\n')
+
+                records_left -= count
+                bytes_written += (count * 2048 * len(channels))  # buf[:, 0:count*NUM_SAMPLES].nbytes
+
+            elapsed = time.time() - start_t
+            bytes_written /= 1e6
+            speed = bytes_written/elapsed
+            if not append:
+                msg_str = '\nDone! Stacked {0:.2f} MB from {channels} channels into "{1:s}", took {2:.2f} s,'+ \
+                          ' effectively {3:.2f} MB/s'
+            else:
+                msg_str = '\nDone! Stacked another {0:.2f} MB from {channels} channels into "{1:s}", took {2:.2f} s,'+ \
+                          ' effectively {3:.2f} MB/s'
+            msg_str = msg_str.format(bytes_written, os.path.abspath(outfile), elapsed, speed, channels=len(channels))
+            print msg_str
+            out_fid_log.write(msg_str+'\n\n')
 
     except IOError as e:
-        print 'Operation failed: %s' % e.strerror
-
-    return files
+        print 'Operation failed: {error}'.format(error=e.strerror)
 
 
 if __name__ == "__main__":
@@ -156,17 +220,14 @@ if __name__ == "__main__":
     # Command line interface
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("target",
-                        nargs='*',
+    parser.add_argument("target", nargs='*',
                         help="""Path/list of paths to directories containing raw .continuous data OR path to .session
                                 definition file.
-                                Listing multiple files will result in data sets being merged in listed order.""")
+                                Listing multiple files will result in data sets being concatenated in listed order.""")
 
     group = parser.add_mutually_exclusive_group()
 
-    group.add_argument("-c", "--channel_list",
-                       nargs='*', default=[],
-                       type=int,
+    group.add_argument("-c", "--channel_list", nargs='*', default=[], type=int,
                        help="""List of channels to merge from the .probe file""")
 
     group.add_argument("-C", "--channel-count", default=64, type=int,
@@ -174,14 +235,17 @@ if __name__ == "__main__":
 
     parser.add_argument("-l", "--layout", help="Path to .probe file.")
     parser.add_argument("-p", "--params", help="Path to .params file.")
+    parser.add_argument("-o", "--output", default='raw.dat', help="Output file path.")
+    parser.add_argument("--remove_trailing_zeros", action='store_true')
+    cli_args = parser.parse_args()
 
-    parser.add_argument("-o", "--output",
-                        default='raw.dat',
-                        help="Output file path.")
-    args = parser.parse_args()
-    print args
-    channels = args.channel_list if args.channel_list else list(range(1, args.channel_count+1))
+    channels = cli_args.channel_list if cli_args.channel_list else list(range(1, cli_args.channel_count+1))
 
-    print folders_to_dat(in_dir=args.target,
-                            outfile=args.output,
-                            channels=channels)
+    if cli_args.remove_trailing_zeros:
+        raise NotImplementedError("Can't remove trailing zeros just yet.")
+
+    for append, directory in enumerate(cli_args.target):
+        folder_to_dat(in_dir=directory,
+                      outfile=cli_args.output,
+                      channels=channels,
+                      append=bool(append))
