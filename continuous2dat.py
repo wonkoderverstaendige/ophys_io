@@ -20,15 +20,23 @@ NUM_SAMPLES = 1024  # number of samples per record
 SIZE_RECORD = 2070  # total size of record (2x1024 B samples + record header)
 REC_MARKER = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 255], dtype=np.uint8)
 
-# data type of .continuous open ephys 0.2x file format header
-HEADER_DT = np.dtype([('Header', 'S%d' % SIZE_HEADER)])
 
-# data type of individual records, n Bytes              # (2048 + 22) Byte = 2070 Byte total
-DATA_DT = np.dtype([('timestamp', np.int64),            # 8 Byte
+def header_dt(size_header=SIZE_HEADER):
+    return np.dtype([('Header', 'S%d' % size_header)])
+
+
+def data_dt(num_samples=NUM_SAMPLES):
+    return np.dtype([('timestamp', np.int64),            # 8 Byte
                     ('n_samples', np.uint16),           # 2 Byte
                     ('rec_num', np.uint16),             # 2 Byte
-                    ('samples', ('>i2', NUM_SAMPLES)),  # 2 Byte each x 1024; note endian type
+                    ('samples', ('>i2', num_samples)),  # 2 Byte each x 1024 typ.; note endian type
                     ('rec_mark', (np.uint8, 10))])      # 10 Byte
+
+# data type of .continuous open ephys 0.2x file format header
+HEADER_DT = header_dt()
+
+# data type of individual records, n Bytes
+DATA_DT = data_dt()  # (2048 + 22) Byte = 2070 Byte total
 
 
 class ContinuousReader(object):
@@ -61,42 +69,23 @@ class ContinuousReader(object):
             pass
 
 
-    class SessionReader(object):
-        def __init__(self, *args, **kwargs):
-            self.input_directory = None
-            assert os.path.isdir(os.path.abspath(self.input_directory))
-            self.buffer = None
-            self.headers = None
-            self.files = None
-            self.channels = None
-            self.proc_node = None
+class SessionReader(object):
+    def __init__(self, *args, **kwargs):
+        self.input_directory = None
+        assert os.path.isdir(os.path.abspath(self.input_directory))
+        self.buffer = None
+        self.headers = None
+        self.files = None
+        self.channels = None
+        self.proc_node = None
 
-        def stack_files(self):
-            pass
+    def stack_files(self):
+        pass
 
-        def gather_files(self):
-            base_name = os.path.join(self.input_directory, '{proc_node:d}_CH{channel:d}.continuous')
-            file_names = [base_name.format(proc_node=self.proc_node, channel=chan) for chan in self.channels]
-            for f in file_names:
-                #print 'Is {file} an existing file? {existence}'.format(file=f, existence='YES' if os.path.isfile(f) else 'NO!')
-                assert os.path.isfile(f)
-        
-            # all input files in a single directory should have equal length
-            file_sizes = [os.path.getsize(fname) for fname in file_names]
-            assert len(set(file_sizes)) == 1
-        
-            return file_names, file_sizes[0]
-        
-
-
-    def gather_files(input_directory, channels, proc_node):
-        """Return list of paths to valid input files for the input directory."""
-        #TODO: Handling non-existing items in file list (i.e. directories named like .continuous files)
-
-        base_name = os.path.join(input_directory, '{proc_node:d}_CH{channel:d}.continuous')
-        file_names = [base_name.format(proc_node=proc_node, channel=chan) for chan in channels]
+    def gather_files(self):
+        base_name = os.path.join(self.input_directory, '{proc_node:d}_CH{channel:d}.continuous')
+        file_names = [base_name.format(proc_node=self.proc_node, channel=chan) for chan in self.channels]
         for f in file_names:
-            #print 'Is {file} an existing file? {existence}'.format(file=f, existence='YES' if os.path.isfile(f) else 'NO!')
             assert os.path.isfile(f)
 
         # all input files in a single directory should have equal length
@@ -104,54 +93,60 @@ class ContinuousReader(object):
         assert len(set(file_sizes)) == 1
 
         return file_names, file_sizes[0]
+        
+
+def gather_files(input_directory, channels, proc_node):
+    """Return list of paths to valid input files for the input directory."""
+    #TODO: Handling non-existing items in file list (i.e. directories named like .continuous files)
+
+    base_name = os.path.join(input_directory, '{proc_node:d}_CH{channel:d}.continuous')
+    file_names = [base_name.format(proc_node=proc_node, channel=chan) for chan in channels]
+    for f in file_names:
+        #print 'Is {file} an existing file? {existence}'.format(file=f, existence='YES' if os.path.isfile(f) else 'NO!')
+        assert os.path.isfile(f)
+
+    # all input files in a single directory should have equal length
+    file_sizes = [os.path.getsize(fname) for fname in file_names]
+    assert len(set(file_sizes)) == 1
+
+    return file_names, file_sizes[0]
 
 
-    def read_header(filename, size_header=SIZE_HEADER):
-        """Return dict with .continuous file header content."""
-        # TODO: Compare headers, should be identical except for channel
+def read_header(filename):
+    """Return dict with .continuous file header content."""
+    # TODO: Compare headers, should be identical except for channel
 
-        # 1 kiB header string data type
-        header_dt = HEADER_DT
-        header = read_segment(filename, offset=0, count=1, dtype=header_dt)
+    # 1 kiB header string data type
+    header = read_segment(filename, offset=0, count=1, dtype=HEADER_DT)
 
-        # Stand back! I know regex!
-        # Annoyingly, there is a newline character missing in the header (version/header_bytes)
-        regex = "header\.([\d\w\.\s]{1,}).=.\'*([^\;\']{1,})\'*"
-        header_str = str(header[0][0]).rstrip(' ')
-        header_dict = {group[0]: group[1] for group in re.compile(regex).findall(header_str)}
-        for key in ['bitVolts', 'sampleRate']:
-            header_dict[key] = float(header_dict[key])
-        for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
-            header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
+    # Stand back! I know regex!
+    # Annoyingly, there is a newline character missing in the header (version/header_bytes)
+    regex = "header\.([\d\w\.\s]{1,}).=.\'*([^\;\']{1,})\'*"
+    header_str = str(header[0][0]).rstrip(' ')
+    header_dict = {group[0]: group[1] for group in re.compile(regex).findall(header_str)}
+    for key in ['bitVolts', 'sampleRate']:
+        header_dict[key] = float(header_dict[key])
+    for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
+        header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
 
-        return header_dict
-
-
-    def read_records(filename, record_offset=0, record_count=10000,
-                    size_header=SIZE_HEADER, num_samples=NUM_SAMPLES, size_record=SIZE_RECORD):
-
-        data_dt = DATA_DT
-        return read_segment(filename, offset=size_header + record_offset*size_record, count=record_count, dtype=data_dt)
+    return header_dict
 
 
-    def read_segment(filename, offset, count, dtype):
-        """Read segment of a file from [offset] for [count]x[dtype]"""
-    # TODO: Use alternative reading method when filename is a file id instead of filename
-        # alternative which moves file pointer
-        #fid = open(filename, 'rb')
-        #data = fid.read(STUFF)
-        #fid.close()
-
+def read_segment(filename, offset, count, dtype):
+    """Read segment of a file from [offset] for [count]x[dtype]"""
     with open(filename, 'rb') as fid:
         fid.seek(offset)
         segment = np.fromfile(fid, dtype=dtype, count=count)
-
     return segment
+
+
+def read_records(filename, record_offset=0, record_count=10000,
+                 size_header=SIZE_HEADER, num_samples=NUM_SAMPLES, size_record=SIZE_RECORD):
+    return read_segment(filename, offset=size_header + record_offset*size_record, count=record_count, dtype=DATA_DT)
 
 
 def check_data(data):
     """Sanity checks of records."""
-
     # Timestamps should increase monotonically in steps of 1024
     assert len(set(np.diff(data['timestamp']))) == 1 and np.diff(data['timestamp'][:2]) == 1024
     print 'timestamps: ', data['timestamp'][0]
@@ -186,15 +181,15 @@ def check_inputs(input_directories):
         True if correct, False if errors occurred
     """
     # TODO: You know... do stuff.
-    pass
+    print input_directories
 
 
 def data_to_buffer(file_paths, count=1000, buf=None, size_record=SIZE_RECORD):
     """Read [count] records from [proc_node] file at [filepath] into a buffer."""
-    assert channels is Iterable
+    assert channel_list is Iterable
     
     # temporary storage
-    buf = buf if buf is not None else np.zeros((len(channels), count * size_record), dtype='>i2')
+    buf = buf if buf is not None else np.zeros((len(channel_list), count * size_record), dtype='>i2')
 
     return buf
 
@@ -251,7 +246,6 @@ def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_
                 # write chunk of interleaved data
                 if count == chunk_size:
                     buf.transpose().tofile(out_fid_dat)
-                    #bytes_written += buf.nbytes
                 else:
                     # We don't want to write the trailing zeros on the last chunk
                     buf[:, 0:count*NUM_SAMPLES].transpose().tofile(out_fid_dat)
@@ -263,12 +257,9 @@ def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_
             elapsed = time.time() - start_t
             bytes_written /= 1e6
             speed = bytes_written/elapsed
-            if not append:
-                msg_str = '\nDone! Stacked {0:.2f} MB from {channels} channels into "{1:s}", took {2:.2f} s,'+ \
-                          ' effectively {3:.2f} MB/s'
-            else:
-                msg_str = '\nDone! Stacked another {0:.2f} MB from {channels} channels into "{1:s}", took {2:.2f} s,'+ \
-                          ' effectively {3:.2f} MB/s'
+            msg_str = '\nDone! Stacked '+'' if not append else 'another' + \
+                      '{0:.2f} MB from {channels} channels into "{1:s}", took {2:.2f} s, effectively {3:.2f} MB/s'
+
             msg_str = msg_str.format(bytes_written, os.path.abspath(outfile), elapsed, speed, channels=len(channels))
             print msg_str
             out_fid_log.write(msg_str+'\n\n')
@@ -287,13 +278,13 @@ if __name__ == "__main__":
                                 definition file.
                                 Listing multiple files will result in data sets being concatenated in listed order.""")
 
-    group = parser.add_mutually_exclusive_group()
+    channel_group = parser.add_mutually_exclusive_group()
 
-    group.add_argument("-c", "--channel_list", nargs='*', default=[], type=int,
-                       help="""List of channels to merge from the .probe file""")
+    channel_group.add_argument("-c", "--channel_list", nargs='*', default=[], type=int,
+                               help="""List of channels to merge from the .probe file""")
 
-    group.add_argument("-C", "--channel-count", default=64, type=int,
-                       help="Number of consecutive channels, 1-based index. E.g. 64: Channels 1:64")
+    channel_group.add_argument("-C", "--channel-count", default=64, type=int,
+                               help="Number of consecutive channels, 1-based index. E.g. 64: Channels 1:64")
 
     parser.add_argument("-l", "--layout", help="Path to .probe file.")
     parser.add_argument("-p", "--params", help="Path to .params file.")
@@ -301,13 +292,13 @@ if __name__ == "__main__":
     parser.add_argument("--remove_trailing_zeros", action='store_true')
     cli_args = parser.parse_args()
 
-    channels = cli_args.channel_list if cli_args.channel_list else list(range(1, cli_args.channel_count+1))
+    channel_list = cli_args.channel_list if cli_args.channel_list else list(range(1, cli_args.channel_count+1))
 
     if cli_args.remove_trailing_zeros:
         raise NotImplementedError("Can't remove trailing zeros just yet.")
 
-    for append, directory in enumerate(cli_args.target):
+    for append_dat, directory in enumerate(cli_args.target):
         folder_to_dat(in_dir=directory,
                       outfile=cli_args.output,
-                      channels=channels,
-                      append=bool(append))
+                      channels=channel_list,
+                      append=bool(append_dat))
