@@ -39,6 +39,26 @@ HEADER_DT = header_dt()
 DATA_DT = data_dt()  # (2048 + 22) Byte = 2070 Byte total
 
 
+def read_header(filename):
+    """Return dict with .continuous file header content."""
+    # TODO: Compare headers, should be identical except for channel
+
+    # 1 kiB header string data type
+    header = read_segment(filename, offset=0, count=1, dtype=HEADER_DT)
+
+    # Stand back! I know regex!
+    # Annoyingly, there is a newline character missing in the header (version/header_bytes)
+    regex = "header\.([\d\w\.\s]{1,}).=.\'*([^\;\']{1,})\'*"
+    header_str = str(header[0][0]).rstrip(' ')
+    header_dict = {group[0]: group[1] for group in re.compile(regex).findall(header_str)}
+    for key in ['bitVolts', 'sampleRate']:
+        header_dict[key] = float(header_dict[key])
+    for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
+        header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
+
+    return header_dict
+
+
 class ContinuousReader(object):
     def __init__(self, file_path, *args, **kwargs):
         self.file_path = os.path.abspath(file_path) 
@@ -49,27 +69,61 @@ class ContinuousReader(object):
         self.bytes_read = None
         self.file_size = None
 
-        self.header = None
-    
         self.buffer = None
+        self._header = None
         
         self.header_dt = HEADER_DT 
         self.data_dt = DATA_DT 
 
-        def read_header(self):
-            pass
+    @property
+    def header(self):
+        if self._header is None:
+            self._header = read_header(self.file_path)
+        return self._header
 
-        def read_chunk(self):
-            pass
+    @header.setter
+    def header(self, value):
+        pass
 
-        def check_data(self):
-            pass
+    def read_header(self):
+        """Return dict with .continuous file header content."""
+        # TODO: Compare headers, should be identical except for channel
 
-        def read_segment(self):
-            pass
+        # 1 kiB header string data type
+        header = read_segment(self.file_path, offset=0, count=1, dtype=HEADER_DT)
+
+        # Stand back! I know regex!
+        # Annoyingly, there is a newline character missing in the header (version/header_bytes)
+        regex = "header\.([\d\w\.\s]{1,}).=.\'*([^\;\']{1,})\'*"
+        header_str = str(header[0][0]).rstrip(' ')
+        header_dict = {group[0]: group[1] for group in re.compile(regex).findall(header_str)}
+        for key in ['bitVolts', 'sampleRate']:
+            header_dict[key] = float(header_dict[key])
+        for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
+            header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
+
+        return header_dict
+
+    def read_chunk(self):
+        pass
+
+    def check_chunk(self):
+        pass
+
+    def check_data(self):
+        pass
+
+    def read_segment(self, offset, count, dtype):
+        """Read segment of a file from [offset] for [count]x[dtype]"""
+        with open(self.file_path, 'rb') as fid:
+            fid.seek(offset)
+            segment = np.fromfile(fid, dtype=dtype, count=count)
+        return segment
 
 
-class SessionReader(object):
+class SliceReader(object):
+    """ Slice reader represents a single slice through all files in a single directory.
+    """
     def __init__(self, *args, **kwargs):
         self.input_directory = None
         assert os.path.isdir(os.path.abspath(self.input_directory))
@@ -110,26 +164,6 @@ def gather_files(input_directory, channels, proc_node):
     assert len(set(file_sizes)) == 1
 
     return file_names, file_sizes[0]
-
-
-def read_header(filename):
-    """Return dict with .continuous file header content."""
-    # TODO: Compare headers, should be identical except for channel
-
-    # 1 kiB header string data type
-    header = read_segment(filename, offset=0, count=1, dtype=HEADER_DT)
-
-    # Stand back! I know regex!
-    # Annoyingly, there is a newline character missing in the header (version/header_bytes)
-    regex = "header\.([\d\w\.\s]{1,}).=.\'*([^\;\']{1,})\'*"
-    header_str = str(header[0][0]).rstrip(' ')
-    header_dict = {group[0]: group[1] for group in re.compile(regex).findall(header_str)}
-    for key in ['bitVolts', 'sampleRate']:
-        header_dict[key] = float(header_dict[key])
-    for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
-        header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
-
-    return header_dict
 
 
 def read_segment(filename, offset, count, dtype):
@@ -218,7 +252,7 @@ def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_
     buf = np.zeros((len(channels), chunk_size*size_record), dtype='>i2')
 
     # calculate number of records from file size
-    # there should be an integer multiple of records, i.e. not leftover bytes!
+    # there should be an integer multiple of records, i.e. no leftover bytes!
     assert not (file_sizes-size_header) % size_record
     num_records = (file_sizes-size_header) // size_record
     records_left = num_records
