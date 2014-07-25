@@ -66,8 +66,6 @@ if __name__ == "__main__":
                       filemode='ab' if bool(append_dat) else 'wb',
                       chunk_size=100)
 
-
-
 # class IterableThingy(object):
 #     def __init__(self):
 #         self.generator = self.test_gen()
