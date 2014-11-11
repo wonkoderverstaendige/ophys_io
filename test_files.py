@@ -14,7 +14,7 @@ args = parser.parse_args()
 
 base_dir = args.target if args.target else 'testing'
 
-input_file = args.input if args.input is not None else 'filenames.tsv'
+input_file = args.input or 'filenames.tsv'
 with open(input_file) as fh:
     [os.makedirs(os.path.join(base_dir, row.split()[0])) for row in fh.readlines()]
             
