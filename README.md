@@ -8,5 +8,5 @@ Help:
 Usage:
 
 ``` 
-~/prog/ophys_io/continuous2dat.py /media/reichler/RED4_01/data/SocialPFC/m0001/2014-10-30_16-07-29 -C 64 -o raw.dat --limit_dur 60 -n 106
+~/prog/ophys_io/continuous2dat.py m0001/2014-10-30_16-07-29 -C 64 -o raw.dat --limit_dur 60 -n 106
 ```
