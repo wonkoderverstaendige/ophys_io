@@ -20,6 +20,7 @@ REC_MARKER = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 255], dtype=np.uint8)
 HEADER_DT = np.dtype([('Header', 'S%d' % SIZE_HEADER)])
 
 # (2048 + 22) Byte = 2070 Byte total
+# FIXME: The rec_mark comes after the samples. Currently data is read assuming full NUM_SAMPLE record!
 DATA_DT = np.dtype([('timestamp', np.int64),            # 8 Byte
                     ('n_samples', np.uint16),           # 2 Byte
                     ('rec_num', np.uint16),             # 2 Byte
@@ -28,6 +29,16 @@ DATA_DT = np.dtype([('timestamp', np.int64),            # 8 Byte
 
 
 def reader(filename, buf):
+    """
+    Reader for a single .continuous file. Writes as many (complete, i.e. NUM_SAMPLES) records into given
+    the buffer as can fit.
+
+    :param filename: File name of the input .continuous file.
+    :param buf: Designated column of a numpy array used for temporary storage/stacking of multiple channel data.
+    :return: Dictionary of all headers read and stored in buffer.
+    """
+    # TODO: Allow sending new index to generator
+    # TODO: Check record size for completion
     with open(filename, 'rb') as fid:
         yield np.fromfile(fid, HEADER_DT, 1)
         while True:
@@ -36,14 +47,30 @@ def reader(filename, buf):
             yield {idx: data[idx] for idx in data.dtype.names if idx != 'samples'} if len(data) else None
 
 
-def folder_to_dat(in_dir_template, out_file, channels, filemode='w', chunk_size=1000000, proc_node=100, *args, **kwargs):
+def folder_to_dat(in_dir_template, out_file, channels, filemode='w', chunk_size=100, proc_node=100, *args, **kwargs):
+    """
+    Convert all .continuous files in channel list of proc_node into a single .dat file. Creates a 'reader' for each
+    individual file.
+
+    :param in_dir_template: Format string of path/files to look for.
+    :param out_file: Name of output .dat file.
+    :param channels: List of channels (in order) that should be converted and merged.
+    :param filemode: (Over-) write or append (append to join multiple source directories).
+    :param chunk_size: Number of samples to read (max size = 2 Byte x chunk_size per channel)
+    :param proc_node: Node ID of the open ephys GUI Processor. See the settings.xml of the data set.
+    :param args:
+    :param kwargs:
+    :return: None
+    """
+    # TODO: Test if better to read row-major and transpose
+    # FIXME: Proper checking of header data (e.g. rec_mark, rec_num, n_samples
     start_t, bytes_written = time.time(), 0
     buf = np.zeros((len(channels), chunk_size*NUM_SAMPLES), dtype='>i2')
     readers = [reader(in_dir_template.format(proc_node, chan), buf[n, :]) for n, chan in enumerate(channels)]
     headers = [r.next() for r in readers]
     with open(out_file, filemode) as out_fid_dat:
         while None not in [r.next() for r in readers]:
-            buf.tofile(out_fid_dat)
+            buf.transpose().tofile(out_fid_dat)
             bytes_written += buf.nbytes
     elapsed = time.time()-start_t
     print '{0:02f} s, {1:02f} MB/s'.format(elapsed, (bytes_written/10**6)/elapsed)
@@ -56,6 +83,7 @@ if __name__ == "__main__":
     channel_group = parser.add_mutually_exclusive_group()
     channel_group.add_argument("-c", "--channel_list", nargs='*', default=[], type=int, help="List of channels")
     channel_group.add_argument("-C", "--channel-count", default=64, type=int, help="Number of consecutive channels")
+    channel_group.add_argument("-p", "--proc_node", default=100, type=int, help="Proc_node of Open Ephys GUI processor")
     parser.add_argument("-o", "--output", default='raw.dat', help="Output file path.")
     cli_args = parser.parse_args()
     channel_list = cli_args.channel_list if cli_args.channel_list else list(range(1, cli_args.channel_count+1))
@@ -63,9 +91,11 @@ if __name__ == "__main__":
         folder_to_dat(in_dir_template=os.path.join(directory, '{0:d}_CH{1:d}.continuous'),
                       out_file=cli_args.output,
                       channels=channel_list,
-                      filemode='ab' if bool(append_dat) else 'wb',
-                      chunk_size=100)
+                      filemode='wb' if not bool(append_dat) else 'ab',
+                      chunk_size=10,
+                      proc_node=cli_args.proc_node)
 
+# GENERATOR STRUCTURE
 # class IterableThingy(object):
 #     def __init__(self):
 #         self.generator = self.test_gen()
@@ -103,5 +133,5 @@ if __name__ == "__main__":
 #     ir = IterableThingy()
 #     for rv in ir:
 #         if '2' in rv:
-#             ir[2]
+#             ir[2] // sends to generator!
 #         print rv

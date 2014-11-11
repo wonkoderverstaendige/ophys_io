@@ -29,7 +29,7 @@ def data_dt(num_samples=NUM_SAMPLES):
     return np.dtype([('timestamp', np.int64),            # 8 Byte
                     ('n_samples', np.uint16),           # 2 Byte
                     ('rec_num', np.uint16),             # 2 Byte
-                    ('samples', ('>i2', num_samples)),  # 2 Byte each x 1024 typ.; note endian type
+                    ('samples', ('i2', num_samples)),  # 2 Byte each x 1024 typ.; note endian type
                     ('rec_mark', (np.uint8, 10))])      # 10 Byte
 
 # data type of .continuous open ephys 0.2x file format header
@@ -228,7 +228,7 @@ def data_to_buffer(file_paths, count=1000, buf=None, size_record=SIZE_RECORD):
     return buf
 
 
-def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_size=100000,
+def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_size=1e5, limit_dur=False,
                   size_record=SIZE_RECORD, size_header=SIZE_HEADER, *args, **kwargs):
     """Given an input directory [in_dir] will write or append .continuous files for channels in [channels] iterable
     of an open ephys [proc_node] into single [outfile] .dat file.
@@ -255,7 +255,10 @@ def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_
     # there should be an integer multiple of records, i.e. no leftover bytes!
     assert not (file_sizes-size_header) % size_record
     num_records = (file_sizes-size_header) // size_record
-    records_left = num_records
+
+    # FIXME: Get sampling rate from header!
+    # If duration limited, find max number of records that should be grabbed
+    records_left = num_records if not limit_dur else min(num_records, int(float(limit_dur)*30000/NUM_SAMPLES))
     bytes_written = 0
 
     try:
@@ -291,8 +294,8 @@ def folder_to_dat(in_dir, outfile, channels, proc_node=100, append=False, chunk_
             elapsed = time.time() - start_t
             bytes_written /= 1e6
             speed = bytes_written/elapsed
-            msg_str = '\nDone! Stacked '+'' if not append else 'another' + \
-                      '{0:.2f} MB from {channels} channels into "{1:s}", took {2:.2f} s, effectively {3:.2f} MB/s'
+            msg_str = '\nDone! {0:.2f} MB from {channels} channels into "{1:s}", took {2:.2f} s, effectively {3:.2f} MB/s'
+            msg_str += '' if not append else 'Stacked another file!'
 
             msg_str = msg_str.format(bytes_written, os.path.abspath(outfile), elapsed, speed, channels=len(channels))
             print msg_str
@@ -321,8 +324,11 @@ if __name__ == "__main__":
                                help="Number of consecutive channels, 1-based index. E.g. 64: Channels 1:64")
 
     parser.add_argument("-l", "--layout", help="Path to .probe file.")
+    parser.add_argument("-n", "--proc_node", help="Processor node id", type=int, default=100)
     parser.add_argument("-p", "--params", help="Path to .params file.")
     parser.add_argument("-o", "--output", default='raw.dat', help="Output file path.")
+    parser.add_argument("--limit_dur", default=False, help="Maximum  duration of recording (s)")
+    parser.add_argument("--chunk_size", default=1e5, help="Number of blocks to read at once as buffer")
     parser.add_argument("--remove_trailing_zeros", action='store_true')
     cli_args = parser.parse_args()
 
@@ -335,4 +341,7 @@ if __name__ == "__main__":
         folder_to_dat(in_dir=directory,
                       outfile=cli_args.output,
                       channels=channel_list,
-                      append=bool(append_dat))
+                      proc_node=cli_args.proc_node,
+                      append=bool(append_dat),
+                      chunk_size=cli_args.chunk_size,
+                      limit_dur=cli_args.limit_dur)
