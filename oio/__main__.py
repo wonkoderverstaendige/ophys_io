@@ -6,6 +6,13 @@ import os.path as op
 from oio import util
 from oio.conversion import continuous_to_dat
 
+import subprocess
+try:
+    version = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
+except:
+    version = "Unknown"
+print("OIO git state: {}".format(version))
+
 
 def main(cli_args=None):
     # Command line interface
@@ -33,7 +40,7 @@ def main(cli_args=None):
         parser.add_argument("-n", "--proc-node", help="Processor node id", type=int, default=100)
         parser.add_argument("-p", "--params", help="Path to .params file.")
         parser.add_argument("-o", "--output", default=None, help="Output file path. Name of target if none given.")
-        parser.add_argument("-L", "--limit-dur", help="Maximum  duration of recording (s)")
+        parser.add_argument("-L", "--limit-dur", type=int, help="Maximum  duration of recording (s)")
         parser.add_argument("--chunk-records", default=10000, type=int,
                             help="Number of records (2 kiB/channel) to read at a time. Increase to speed up, reduce to"
                                  "deal with memory limitations. Default: ~20 MiB/channel")
@@ -83,7 +90,7 @@ def main(cli_args=None):
 
         for append_dat, input_dir in enumerate(cli_args.target):
             print("<-- Input: {}\n--> Output: {}".format(input_dir, output_path))
-            print(channel_group, dead_channels, cli_args.proc_node)
+            # print(channel_group, dead_channels, cli_args.proc_node)
             continuous_to_dat(input_path=op.expanduser(input_dir),
                               output_path=output_path,
                               channel_group=channel_group,

@@ -61,13 +61,14 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
 
             # If duration limited, find max number of records that should be grabbed
             records_left = num_records if not limit_dur \
-                else min(num_records, int(float(limit_dur) * sampling_rate / block_size))
+                else min(num_records, int(limit_dur * sampling_rate // block_size))
 
             # # preallocate temporary storage
             # buf = oe.make_buffer(len(data_channels), chunk_records)
 
             # loop over all records, in chunk sizes
             bytes_written = 0
+            count = 0
             while records_left:
                 # print(num_records, records_left)
                 count = min(records_left, chunk_records)
@@ -107,14 +108,14 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
                 records_left -= count
                 bytes_written += (count * 2048 * len(data_channels))
 
-            duration = bytes_written/(2*sampling_rate)
+            duration = bytes_written/(2*sampling_rate*len(data_channels))
             elapsed = time.time() - start_t
             speed = bytes_written / elapsed
             msg_str = '{appended} {channels} channels into "{op:s}"\n' \
-                      '({dur:s} [{bw:.2f} MB] in {et:.2f} s [{ts:.2f} MB/s])\n'
+                      '{rec} blocks ({dur:s}, {bw:.2f} MB) in {et:.2f} s ({ts:.2f} MB/s)\n'
 
             msg_str = msg_str.format(appended="Appended" if append else "Wrote", channels=len(data_channels),
-                                     op=os.path.abspath(output_path),
+                                     op=os.path.abspath(output_path), rec=count,
                                      dur=fmt_time(duration), bw=bytes_written/1e6, et=elapsed, ts=speed/1e6)
             print(msg_str)
             out_fid_log.write(msg_str + '\n\n')
@@ -124,4 +125,5 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
 
 
 def kwik_to_dat(*args, **kwargs):
+    print(args, kwargs)
     raise NotImplementedError
