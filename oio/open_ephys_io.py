@@ -1,8 +1,7 @@
 import re
 import os.path as op
 import numpy as np
-import warnings
-import contextlib
+
 
 SIZE_HEADER = 1024  # size of header in B
 NUM_SAMPLES = 1024  # number of samples per record
@@ -12,6 +11,14 @@ NAME_TEMPLATE = '{proc_node:d}_CH{channel:d}.continuous'
 
 # HEADER_REGEX = re.compile("header\.([\d\w.\s]+).=.'*([^;']+)'*")
 HEADER_REGEX = re.compile("header\.([\d\w.\s]+).=.\'*([^;\']+)\'*")
+
+
+def gather_files(input_directory, channels, proc_node, template=NAME_TEMPLATE):
+    """Return list of paths to valid input files for the input directory."""
+    file_names = [op.join(input_directory, template.format(proc_node=proc_node, channel=chan))
+                  for chan in channels]
+    assert len([f for f in file_names if op.isfile(f)]) == len(file_names)
+    return file_names
 
 
 # data type of .continuous open ephys 0.2x file format header
@@ -29,10 +36,27 @@ def data_dt(num_samples=NUM_SAMPLES):
                      ('rec_mark', (np.uint8, len(REC_MARKER)))])  # 10 Byte
 
 
-def fmt_header(header):
+def check_headers(oe_file):
+    """Check that length, sampling rate, buffer and block sizes of a list of open-ephys ContinuousFiles are
+    identical and return them in that order."""
+    # Check oe_file make sense (same size, same sampling rate, etc.
+    num_records = [f.num_records for f in oe_file]
+    sampling_rates = [f.header['sampleRate'] for f in oe_file]
+    buffer_sizes = [f.header['bufferSize'] for f in oe_file]
+    block_sizes = [f.header['blockLength'] for f in oe_file]
+
+    assert len(set(num_records)) == 1
+    assert len(set(sampling_rates)) == 1
+    assert len(set(buffer_sizes)) == 1
+    assert len(set(block_sizes)) == 1
+
+    return num_records[0], sampling_rates[0], buffer_sizes[0], block_sizes[0]
+
+
+def fmt_header(header_str):
     # Stand back! I know regex!
-    # Annoyingly, there is a newline character missing in the header (version/header_bytes)
-    header_str = str(header[0][0]).rstrip(' ')
+    # Annoyingly, there is a newline character missing in the header_str (version/header_bytes)
+    header_str = str(header_str[0][0]).rstrip(' ')
     header_dict = {group[0]: group[1] for group in HEADER_REGEX.findall(header_str)}
     for key in ['bitVolts', 'sampleRate']:
         header_dict[key] = float(header_dict[key])
@@ -43,79 +67,66 @@ def fmt_header(header):
 
 class ContinuousFile:
     """Single .continuous file. Generates chunks of data."""
-    def __init__(self, path):
-        try:
-            self.path = op.abspath(op.expanduser(path))
-            self.file_size = op.getsize(self.path)
+    # TODO: Allow record counts and offsets
 
-            # Make sure we have full records all the way through
-            assert (self.file_size-SIZE_HEADER) % SIZE_RECORD == 0
-        except IOError:
-            raise IOError
+    def __init__(self, path):
+        self.path = op.abspath(op.expanduser(path))
+        self.file_size = op.getsize(self.path)
+        # Make sure we have full records all the way through
+        assert (self.file_size-SIZE_HEADER) % SIZE_RECORD == 0
+        self.num_records = (self.file_size-SIZE_HEADER) // SIZE_RECORD
+        self.duration = self.num_records
 
     def __enter__(self):
         self.header = self._read_header()
+        self.record_dtype = data_dt(self.header['blockLength'])
         self.__fid = open(self.path, 'rb')
+        return self
 
     def _read_header(self):
         return fmt_header(np.fromfile(self.path, dtype=header_dt(), count=1))
 
-    def _read_record(self):
-        return np.fromfile(self.__fid, dtype=data_dt(), count=1)
+    def read_record(self, count=1):
+        return np.fromfile(self.__fid, dtype=self.record_dtype, count=count)['samples'].reshape(-1)
+
+    def next(self):
+        return self.read_record() if self.__fid.tell() < self.file_size else None
 
     def __exit__(self, *args):
         self.__fid.close()
 
 
-def read_header(filename):
-    """Return dict with .continuous file header content."""
-    # 1 kiB header string data type
-    return fmt_header(read_segment(filename, offset=0, count=1, dtype=header_dt()))
+# def read_header(filename):
+#     """Return dict with the content of the 1kiB .continuous file header."""
+#     return fmt_header(read_segment(filename, offset=0, count=1, dtype=header_dt()))
+#
+#
+# def read_segment(filename, offset, count, dtype):
+#     """Read segment of a file from [offset] for [count]x[dtype]"""
+#     with open(filename, 'rb') as fid:
+#         fid.seek(offset)
+#         # print(count)
+#         segment = np.fromfile(fid, dtype=dtype, count=count)
+#     return segment
+#
+#
+# def read_records(filename, record_offset=0, record_count=10000,
+#                  size_header=SIZE_HEADER, num_samples=NUM_SAMPLES, size_record=SIZE_RECORD):
+#     return read_segment(filename, offset=size_header + record_offset * size_record, count=record_count,
+#                         dtype=data_dt())
+#
+#
+# def suggest_proc_node(path):
+#     """Suggest proc node based on files present in the target directory"""
+#     # FIXME: do the actual checking
+#     warnings.warn("Proc node suggestion with magic number (100)")
+#     return 100
 
 
-def gather_files(input_directory, channels, proc_node):
-    """Return list of paths to valid input files for the input directory."""
-    # TODO: Handle missing node name, suggest node id from file names (check for cont. files, extract proc, compare
-
-    file_names = [op.join(input_directory, NAME_TEMPLATE.format(proc_node=proc_node, channel=chan))
-                  for chan in channels]
-    for f in file_names:
-        assert op.isfile(f)
-
-    # all input files in a single directory should have equal length
-    file_sizes = [op.getsize(fname) for fname in file_names]
-    assert len(set(file_sizes)) == 1
-
-    return file_names, file_sizes[0]
-
-
-def read_segment(filename, offset, count, dtype):
-    """Read segment of a file from [offset] for [count]x[dtype]"""
-    with open(filename, 'rb') as fid:
-        fid.seek(offset)
-        # print(count)
-        segment = np.fromfile(fid, dtype=dtype, count=count)
-    return segment
-
-
-def read_records(filename, record_offset=0, record_count=10000,
-                 size_header=SIZE_HEADER, num_samples=NUM_SAMPLES, size_record=SIZE_RECORD):
-    return read_segment(filename, offset=size_header + record_offset * size_record, count=record_count,
-                        dtype=data_dt())
-
-
-def suggest_proc_node(path):
-    """Suggest proc node based on files present in the target directory"""
-    # FIXME: do the actual checking
-    warnings.warn("Proc node suggestion with magic number (100)")
-    return 100
-
-
-def make_buffer(n_channels, chunk_size, dtype=np.int16):
-    return np.zeros((n_channels, chunk_size*SIZE_RECORD), dtype=dtype)
-
-
-
+# def make_buffer(n_channels, chunk_size, dtype=np.int16):
+#     return np.zeros((n_channels, chunk_size*SIZE_RECORD), dtype=dtype)
+#
+#
 # def data_to_buffer(file_paths, count=1000, buf=None, size_record=SIZE_RECORD):
 #     """Read [count] records from [proc_node] file at [filepath] into a buffer."""
 #     buf = buf if buf is not None else np.zeros((len(file_paths), count * size_record), dtype='>i2')
@@ -211,3 +222,4 @@ def make_buffer(n_channels, chunk_size, dtype=np.int16):
 #         assert len(set(file_sizes)) == 1
 #
 #         return file_names, file_sizes[0]
+

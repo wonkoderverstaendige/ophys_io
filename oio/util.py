@@ -69,3 +69,14 @@ def fmt_channel_ranges(channels, shorten_seq=5, rs="tm", cs="_", zp=2):
                      else "{start:0{zp}}{rs}{end:0{zp}".format(start=cr[0], end=cr[-1], rs=rs, zp=zp)
                      for cr in cr]
     return cs.join(range_strings)
+
+
+def fmt_time(s):
+    ms = int(s-int(s))
+    s = int(s)
+    m, s = divmod(s, 60)
+    if m < 60:
+        return "{m:02d}min{s:02d}.{ms:d}s".format(m=m, s=s, ms=ms)
+    else:
+        h, m = divmod(m, 60)
+        return "{h:02d}h{m:02d}min{s:02d}.{ms:d}s".format(h=h, m=m, s=s, ms=ms)
