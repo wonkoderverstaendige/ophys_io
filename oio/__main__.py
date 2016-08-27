@@ -2,16 +2,17 @@
 # -*- coding: utf-8 -*-
 
 import warnings
+import logging
 import os.path as op
 from oio import util
 from oio.conversion import continuous_to_dat
 
 import subprocess
+
 try:
     version = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
 except:
     version = "Unknown"
-print("OIO git state: {}".format(version))
 
 
 def main(cli_args=None):
@@ -24,6 +25,8 @@ def main(cli_args=None):
                             help="""Path/list of paths to directories containing raw .continuous data OR path
                                     to .session definition file. Listing multiple files will result in data sets
                                     being concatenated in listed order.""")
+        parser.add_argument('-v', '--verbose', action='store_true',
+                            help="Verbose (debug) output")
 
         channel_group = parser.add_mutually_exclusive_group()
         channel_group.add_argument("-c", "--channel-count", type=int,
@@ -33,20 +36,24 @@ def main(cli_args=None):
         channel_group.add_argument("-l", "--layout",
                                    help="Path to klusta .probe file.")
 
-        parser.add_argument("-D", "--dead-channels", nargs='*', type=int,
+        parser.add_argument("-d", "--dead-channels", nargs='*', type=int,
                             help="List of dead channels. If flag set, these will be set to zero.")
         parser.add_argument("-S", "--split-groups", action="store_false",
                             help="Split channel groups into separate files.")
         parser.add_argument("-n", "--proc-node", help="Processor node id", type=int, default=100)
         parser.add_argument("-p", "--params", help="Path to .params file.")
         parser.add_argument("-o", "--output", default=None, help="Output file path. Name of target if none given.")
-        parser.add_argument("-L", "--limit-dur", type=int, help="Maximum  duration of recording (s)")
+        parser.add_argument("-D", "--duration", type=int, help="Maximum  duration of recording (s)")
         parser.add_argument("--chunk-records", default=10000, type=int,
                             help="Number of records (2 kiB/channel) to read at a time. Increase to speed up, reduce to"
                                  "deal with memory limitations. Default: ~20 MiB/channel")
         parser.add_argument("--remove-trailing-zeros", action='store_true')
-        parser.add_argument("--zero-dead-channels", action='store_true')
+        parser.add_argument("-z", "--zero-dead-channels", action='store_true')
         cli_args = parser.parse_args()
+
+    log_level = logging.DEBUG if cli_args.verbose else logging.INFO
+    logging.basicConfig(level=log_level, format='%(asctime)s %(message)s')
+    logging.info('Starting conversion with version {}'.format(version))
 
     if cli_args.remove_trailing_zeros:
         raise NotImplementedError("Can't remove trailing zeros just yet.")
@@ -88,17 +95,21 @@ def main(cli_args=None):
                                                                     cg_id=cg_id, crs=crs)
         output_path = op.join(out_path, output)
 
-        for append_dat, input_dir in enumerate(cli_args.target):
-            print("<-- Input: {}\n--> Output: {}".format(input_dir, output_path))
-            # print(channel_group, dead_channels, cli_args.proc_node)
-            continuous_to_dat(input_path=op.expanduser(input_dir),
-                              output_path=output_path,
-                              channel_group=channel_group,
-                              dead_channels=dead_channels,
-                              proc_node=cli_args.proc_node,
-                              append=bool(append_dat),
-                              chunk_records=int(cli_args.chunk_records),
-                              limit_dur=cli_args.limit_dur)
+        time_written = 0
+        for append_dat, input_path in enumerate(cli_args.target):
+            time_written += continuous_to_dat(
+                input_path=op.expanduser(input_path),
+                output_path=output_path,
+                channel_group=channel_group,
+                dead_channels=dead_channels,
+                zero_dead_channels=cli_args.zero_dead_channels,
+                proc_node=cli_args.proc_node,
+                file_mode='a' if bool(append_dat) else 'w',
+                chunk_records=cli_args.chunk_records,
+                duration=cli_args.duration - time_written)
+
+    logging.info('Done!')
+
 
 if __name__ == "__main__":
     main()
