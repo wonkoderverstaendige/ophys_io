@@ -14,8 +14,10 @@ setup(description='OpenEphys IO tools',
       license='MIT',
       install_requires=['nose', 'numpy', 'six'],
       packages=['oio'],
+      package_data={'config': ['config/*.*']},
+      include_package_data=True,
       name='oio',
       entry_points="""
         [console_scripts]
         oio=oio.__main__:main
-    """)
+      """)
