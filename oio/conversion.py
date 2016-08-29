@@ -21,9 +21,9 @@ LOG_STR_INPUT = '==> Input: {path}'
 LOG_STR_OUTPUT = '<== Output {path}'
 LOG_STR_CHAN = 'Channels: {channels}, reference: {reference}, Dead: {dead}, ' \
                'proc_node: {proc_node}, write mode: {file_mode}'
-LOG_STR_ITEM = '    Header: channel: {header[channel]}, date: {header[date_created]}'
-DEBUG_STR_CHUNK = '~ Reading {count} records ({current})'
-DEBUG_STR_REREF = '~ Re-referencing with channels {channels}'
+LOG_STR_ITEM = ', Header: channel: {header[channel]}, date: {header[date_created]}'
+DEBUG_STR_CHUNK = '~ Reading {count} records (left: {left}, max: {num_records})'
+DEBUG_STR_REREF = '~ Re-referencing by subtracting average of channels {channels}'
 DEBUG_STR_ZEROS = '~ Zeroing (Flag: {flag}) dead channel {channel}'
 
 MODE_STR = {'a': 'Append', 'w': "Write"}
@@ -44,6 +44,7 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
     formatter = logging.Formatter('%(message)s')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
+    logger.setLevel(logging.DEBUG)
 
     logger.info(LOG_STR_INPUT.format(path=input_path))
     logger.info(LOG_STR_OUTPUT.format(path=output_path))
@@ -67,12 +68,12 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
 
             data_files = [stack.enter_context(oe.ContinuousFile(f)) for f in data_file_paths]
             ref_files = [stack.enter_context(oe.ContinuousFile(f)) for f in ref_file_paths]
-            for n, oe_file in enumerate(data_files):
-                logger.info("Open data file {}: {}".format(n, op.basename(oe_file.path)))
-                logger.info(LOG_STR_ITEM.format(header=oe_file.header))
-            for n, oe_file in enumerate(ref_files):
-                logger.info("Open reference file {}: {}".format(n, op.basename(oe_file.path)))
-                logger.info(LOG_STR_ITEM.format(header=oe_file.header))
+            for oe_file in data_files:
+                logger.info("Open data file: {}".format(op.basename(oe_file.path)) +
+                            LOG_STR_ITEM.format(header=oe_file.header))
+            for oe_file in ref_files:
+                logger.info("Open reference file: {}".format(op.basename(oe_file.path)) +
+                            LOG_STR_ITEM.format(header=oe_file.header))
 
             num_records, sampling_rate, buffer_size, block_size = oe.check_headers(data_files + ref_files)
 
@@ -94,7 +95,8 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
             while records_left:
                 count = min(records_left, chunk_records)
 
-                logger.debug(DEBUG_STR_CHUNK.format(count=count, current=num_records-records_left))
+                logger.debug(DEBUG_STR_CHUNK.format(count=count, left=records_left,
+                             num_records=num_records))
                 res = np.vstack([f.read_record(count) for f in data_files])
 
                 # reference channels if needed
@@ -138,7 +140,8 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
                 appended=MODE_STR_PAST[file_mode], channels=len(data_channels),
                 op=os.path.abspath(output_path)))
             logger.info('{rec} blocks ({dur:s}, {bw:.2f} MB) in {et:.2f} s ({ts:.2f} MB/s)'.format(
-                rec=count, dur=fmt_time(duration), bw=bytes_written / 1e6, et=elapsed, ts=speed / 1e6))
+                rec=num_records-records_left, dur=fmt_time(data_duration),
+                bw=bytes_written / 1e6, et=elapsed, ts=speed / 1e6))
 
             # returning duration of data written, epsilon=1 sample, allows external loop to make proper judgement if
             # going to next target makes sense via comparison. E.g. if time less than one sample short of

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import sys
 import warnings
 import logging
+import os
 import os.path as op
+import subprocess
+import pkg_resources
+
 from oio import util
 from oio.conversion import continuous_to_dat
 
-import subprocess
 
 try:
     version = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
@@ -86,9 +90,12 @@ def main(cli_args=None):
         else:
             out_ext = op.splitext(out_file)
 
+    if not op.exists(out_path):
+        os.mkdir(out_path)
     # indicate when more than one source was merged into the .dat file
     out_file += "+{}files".format(len(cli_args.target) - 1) if len(cli_args.target) > 1 else ''
 
+    time_written = 0
     for cg_id, channel_group in channel_groups.items():
         crs = util.fmt_channel_ranges(channel_group['channels'])
         output = "{outfile}--cg({cg_id:02})_ch[{crs}].{ext}".format(outfile=out_file, ext=out_ext,
@@ -97,6 +104,8 @@ def main(cli_args=None):
 
         time_written = 0
         for append_dat, input_path in enumerate(cli_args.target):
+            duration = None if cli_args.duration is None else cli_args.duration - time_written
+
             time_written += continuous_to_dat(
                 input_path=op.expanduser(input_path),
                 output_path=output_path,
@@ -106,9 +115,9 @@ def main(cli_args=None):
                 proc_node=cli_args.proc_node,
                 file_mode='a' if bool(append_dat) else 'w',
                 chunk_records=cli_args.chunk_records,
-                duration=cli_args.duration - time_written)
+                duration=duration)
 
-    logging.info('Done!')
+    logging.info('Done! Total data duration: {}'.format(util.fmt_time(time_written)))
 
 
 if __name__ == "__main__":
