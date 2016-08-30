@@ -100,8 +100,6 @@ def main(cli_args=None):
 
     time_written = 0
     for cg_id, channel_group in channel_groups.items():
-        if cg_id > 0:
-            break
         crs = util.fmt_channel_ranges(channel_group['channels'])
         output_base_name = "{outfile}--cg({cg_id:02})_ch[{crs}]".format(outfile=out_file, cg_id=cg_id, crs=crs)
         output_file_name = '.'.join([output_base_name, output_ext])

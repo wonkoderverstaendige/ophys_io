@@ -32,7 +32,7 @@ def data_dt(num_samples=NUM_SAMPLES):
     return np.dtype([('timestamp', np.int64),  # 8 Byte
                      ('n_samples', np.uint16),  # 2 Byte
                      ('rec_num', np.uint16),  # 2 Byte
-                     ('samples', (np.int16, num_samples)),  # 2 Byte each x 1024 typ.
+                     ('samples', ('>i2', num_samples)),  # 2 Byte each x 1024 typ.
                      ('rec_mark', (np.uint8, len(REC_MARKER)))])  # 10 Byte
 
 
@@ -81,13 +81,18 @@ class ContinuousFile:
         self.header = self._read_header()
         self.record_dtype = data_dt(self.header['blockLength'])
         self.__fid = open(self.path, 'rb')
+        self.__fid.seek(SIZE_HEADER)
         return self
 
     def _read_header(self):
         return fmt_header(np.fromfile(self.path, dtype=header_dt(), count=1))
 
     def read_record(self, count=1):
-        return np.fromfile(self.__fid, dtype=self.record_dtype, count=count)['samples'].reshape(-1)
+        buf = np.fromfile(self.__fid, dtype=self.record_dtype, count=count)
+
+        # make sure offsets are likely correct
+        assert np.array_equal(buf[0]['rec_mark'], REC_MARKER)
+        return buf['samples'].reshape(-1)
 
     def next(self):
         return self.read_record() if self.__fid.tell() < self.file_size else None

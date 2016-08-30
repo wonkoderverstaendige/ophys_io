@@ -2,7 +2,7 @@ experiment_name = '{experiment_name}'
 prb_file = '{probe_file}'
 
 traces = dict(
-    raw_data_files= [experiment_name + '.dat'],
+    raw_data_files=[experiment_name + '.dat'],
     voltage_gain=0.195,  # voltage gain or uVpb???
     sample_rate=30000,
     n_channels={n_channels},
@@ -28,7 +28,7 @@ spikedetekt = dict(
 
     connected_component_join_size=1,
 
-    extract_s_before=16, # Samples before
+    extract_s_before=16,  # Samples before
     extract_s_after=16,  # Samples after
 
     n_features_per_channel=3,  # Number of features per channel.

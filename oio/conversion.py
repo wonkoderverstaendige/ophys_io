@@ -111,7 +111,7 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
                         logger.debug(DEBUG_STR_ZEROS.format(flag=zero_dead_channels, channel=data_channels[dci]))
                         res[dci] = zeros
 
-                #res.transpose().tofile(out_fid_dat)
+                res.transpose().tofile(out_fid_dat)
 
                 # offset = num_records - records_left
 
