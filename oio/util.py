@@ -25,6 +25,14 @@ def run_prb(path):
     return metadata
 
 
+def make_prb(path, stuff):
+    raise NotImplementedError
+
+
+def make_prm(path, stuff):
+    raise NotImplementedError
+
+
 def channel_ranges(channel_list):
     """List of channels in to ranges of consecutive channels.
 

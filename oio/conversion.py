@@ -39,7 +39,7 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
     """
 
     start_t = time.time()
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger(output_path)
     file_handler = logging.FileHandler(output_path + '.log', mode=file_mode)
     formatter = logging.Formatter('%(message)s')
     file_handler.setFormatter(formatter)
@@ -111,7 +111,7 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
                         logger.debug(DEBUG_STR_ZEROS.format(flag=zero_dead_channels, channel=data_channels[dci]))
                         res[dci] = zeros
 
-                res.transpose().tofile(out_fid_dat)
+                #res.transpose().tofile(out_fid_dat)
 
                 # offset = num_records - records_left
 
@@ -146,6 +146,9 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
             # returning duration of data written, epsilon=1 sample, allows external loop to make proper judgement if
             # going to next target makes sense via comparison. E.g. if time less than one sample short of
             # duration limit.
+            logger.removeHandler(file_handler)
+            file_handler.close()
+
             return data_duration
 
     except IOError as e:

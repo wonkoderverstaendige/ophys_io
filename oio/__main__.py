@@ -7,16 +7,18 @@ import logging
 import os
 import os.path as op
 import subprocess
-import pkg_resources
+import pkg_resources as pkgr
+import pprint
 
 from oio import util
 from oio.conversion import continuous_to_dat
-
 
 try:
     version = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
 except:
     version = "Unknown"
+
+WRITE_DATA = True
 
 
 def main(cli_args=None):
@@ -52,12 +54,13 @@ def main(cli_args=None):
                             help="Number of records (2 kiB/channel) to read at a time. Increase to speed up, reduce to"
                                  "deal with memory limitations. Default: ~20 MiB/channel")
         parser.add_argument("--remove-trailing-zeros", action='store_true')
+        parser.add_argument("--dry-run", action='store_true')
         parser.add_argument("-z", "--zero-dead-channels", action='store_true')
         cli_args = parser.parse_args()
 
     log_level = logging.DEBUG if cli_args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format='%(asctime)s %(message)s')
-    logging.info('Starting conversion with version {}'.format(version))
+    logging.info('Starting conversion with OIO git version {}'.format(version))
 
     if cli_args.remove_trailing_zeros:
         raise NotImplementedError("Can't remove trailing zeros just yet.")
@@ -81,14 +84,14 @@ def main(cli_args=None):
 
     # involved file names
     if cli_args.output is None:
-        out_path, out_file, out_ext = '', op.basename(op.splitext(cli_args.target[0])[0]), "dat"
+        out_path, out_file, output_ext = '', op.basename(op.splitext(cli_args.target[0])[0]), "dat"
     else:
         out_path, out_file = op.split(op.expanduser(cli_args.output))
         if out_file == '':
             out_file = op.basename(cli_args.target[0])
-            out_ext = "dat"
+            output_ext = "dat"
         else:
-            out_ext = op.splitext(out_file)
+            output_ext = op.splitext(out_file)
 
     if not op.exists(out_path):
         os.mkdir(out_path)
@@ -97,25 +100,42 @@ def main(cli_args=None):
 
     time_written = 0
     for cg_id, channel_group in channel_groups.items():
+        if cg_id > 0:
+            break
         crs = util.fmt_channel_ranges(channel_group['channels'])
-        output = "{outfile}--cg({cg_id:02})_ch[{crs}].{ext}".format(outfile=out_file, ext=out_ext,
-                                                                    cg_id=cg_id, crs=crs)
-        output_path = op.join(out_path, output)
+        output_base_name = "{outfile}--cg({cg_id:02})_ch[{crs}]".format(outfile=out_file, cg_id=cg_id, crs=crs)
+        output_file_name = '.'.join([output_base_name, output_ext])
+        output_file_path = op.join(out_path, output_file_name)
 
         time_written = 0
-        for append_dat, input_path in enumerate(cli_args.target):
+        for file_mode, input_file_path in enumerate(cli_args.target):
             duration = None if cli_args.duration is None else cli_args.duration - time_written
 
-            time_written += continuous_to_dat(
-                input_path=op.expanduser(input_path),
-                output_path=output_path,
-                channel_group=channel_group,
-                dead_channels=dead_channels,
-                zero_dead_channels=cli_args.zero_dead_channels,
-                proc_node=cli_args.proc_node,
-                file_mode='a' if bool(append_dat) else 'w',
-                chunk_records=cli_args.chunk_records,
-                duration=duration)
+            if not cli_args.dry_run and WRITE_DATA:
+                time_written += continuous_to_dat(
+                    input_path=op.expanduser(input_file_path),
+                    output_path=output_file_path,
+                    channel_group=channel_group,
+                    dead_channels=dead_channels,
+                    zero_dead_channels=cli_args.zero_dead_channels,
+                    proc_node=cli_args.proc_node,
+                    file_mode='a' if file_mode else 'w',
+                    chunk_records=cli_args.chunk_records,
+                    duration=duration)
+
+        # create the per-group .prb and .prm files
+        with open(op.join(out_path, output_base_name + '.prb'), 'w') as prb_out:
+            cg_dict = {cg_id: channel_group}
+            if cli_args.zero_dead_channels:
+                cg_dict[cg_id]['dead_channels'] = [dc for dc in dead_channels if dc in channel_group['channels']]
+            prb_out.write('channel_groups = {}'.format(pprint.pformat(cg_dict)))
+
+        with open(op.join(out_path, output_base_name + '.prm'), 'w') as prm_out:
+            prm_in = pkgr.resource_string('config', 'default.prm').decode()
+            prm_out.write(prm_in.format(experiment_name=output_base_name,
+                                        probe_file=output_base_name + '.prb',
+                                        raw_file=output_file_path,
+                                        n_channels=len(channel_group['channels'])))
 
     logging.info('Done! Total data duration: {}'.format(util.fmt_time(time_written)))
 
