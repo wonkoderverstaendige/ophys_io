@@ -73,16 +73,16 @@ def fmt_channel_ranges(channels, shorten_seq=5, rs="tm", cs="_", zp=2):
     """
     cr = channel_ranges(channels)
     range_strings = [cs.join(["{c:0{zp}}".format(c=c, zp=zp) for c in cr])
-                     if len(cr) < shorten_seq
-                     else "{start:0{zp}}{rs}{end:0{zp}".format(start=cr[0], end=cr[-1], rs=rs, zp=zp)
-                     for cr in cr]
+                     if len(c) < shorten_seq
+                     else "{start:0{zp}}{rs}{end:0{zp}}".format(start=c[0], end=c[-1], rs=rs, zp=zp)
+                     for c in cr]
     return cs.join(range_strings)
 
 
 def fmt_time(s, minimal=True):
     """
     Args:
-        s: time in seconds (float for fractionals)
+        s: time in seconds (float for fractional)
         minimal: Flag, if true, only return strings for times > 0, leave rest outs
     Returns: String formatted 99h 59min 59.9s, where elements < 1 are left out optionally.
 
