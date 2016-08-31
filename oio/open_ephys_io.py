@@ -1,7 +1,9 @@
 import re
+import sys
 import os.path as op
+import logging
+import warnings
 import numpy as np
-
 
 SIZE_HEADER = 1024  # size of header in B
 NUM_SAMPLES = 1024  # number of samples per record
@@ -17,7 +19,14 @@ def gather_files(input_directory, channels, proc_node, template=NAME_TEMPLATE):
     """Return list of paths to valid input files for the input directory."""
     file_names = [op.join(input_directory, template.format(proc_node=proc_node, channel=chan))
                   for chan in channels]
-    assert len([f for f in file_names if op.isfile(f)]) == len(file_names)
+    is_file = {f: op.isfile(f) for f in file_names}
+    try:
+        assert all(is_file.values())
+    except AssertionError:
+        print(IOError("Input files not found: {}".format([f for f, exists in is_file.items() if not exists])))
+        sys.exit(1)
+    # assert all([f for f in file_names if op.isfile(f)]) == len(file_names)
+    logging.debug('File names gathered: {}'.format(file_names))
     return file_names
 
 
@@ -67,14 +76,15 @@ def fmt_header(header_str):
 
 class ContinuousFile:
     """Single .continuous file. Generates chunks of data."""
+
     # TODO: Allow record counts and offsets
 
     def __init__(self, path):
         self.path = op.abspath(op.expanduser(path))
         self.file_size = op.getsize(self.path)
         # Make sure we have full records all the way through
-        assert (self.file_size-SIZE_HEADER) % SIZE_RECORD == 0
-        self.num_records = (self.file_size-SIZE_HEADER) // SIZE_RECORD
+        assert (self.file_size - SIZE_HEADER) % SIZE_RECORD == 0
+        self.num_records = (self.file_size - SIZE_HEADER) // SIZE_RECORD
         self.duration = self.num_records
 
     def __enter__(self):

@@ -71,7 +71,7 @@ def main(cli_args=None):
     # Set up channel layout (channels, references, dead channels) from command line inputs or layout file
     dead_channels = cli_args.dead_channels if cli_args.dead_channels is not None else []
     if cli_args.channel_count is not None:
-        channel_groups = {0: {'channels': list(range(1, cli_args.channel_count + 1))}}
+        channel_groups = {0: {'channels': list(range(cli_args.channel_count))}}
     elif cli_args.channel_list is not None:
         channel_groups = {0: {'channels': cli_args.channel_list}}
     elif cli_args.layout is not None:
@@ -84,25 +84,31 @@ def main(cli_args=None):
 
     # involved file names
     if cli_args.output is None:
-        out_path, out_file, output_ext = '', op.basename(op.splitext(cli_args.target[0])[0]), "dat"
+        out_path, out_file, out_ext = '', op.basename(op.splitext(cli_args.target[0])[0]), "dat"
     else:
         out_path, out_file = op.split(op.expanduser(cli_args.output))
         if out_file == '':
             out_file = op.basename(cli_args.target[0])
-            output_ext = "dat"
-        else:
-            output_ext = op.splitext(out_file)
 
-    if not op.exists(out_path):
+        out_file, out_ext = op.splitext(out_file)
+        out_ext = out_ext.strip('.')
+        if out_ext == '':
+            out_ext = 'dat'
+
+    if len(out_path) and not op.exists(out_path):
         os.mkdir(out_path)
     # indicate when more than one source was merged into the .dat file
     out_file += "+{}files".format(len(cli_args.target) - 1) if len(cli_args.target) > 1 else ''
 
+    logging.debug('Output path, file, extension: "{}", "{}", "{}"'.format(out_path, out_file, out_ext))
+
     time_written = 0
     for cg_id, channel_group in channel_groups.items():
+        logging.debug('channel group: {}'.format(channel_group))
+
         crs = util.fmt_channel_ranges(channel_group['channels'])
         output_base_name = "{outfile}--cg({cg_id:02})_ch[{crs}]".format(outfile=out_file, cg_id=cg_id, crs=crs)
-        output_file_name = '.'.join([output_base_name, output_ext])
+        output_file_name = '.'.join([output_base_name, out_ext])
         output_file_path = op.join(out_path, output_file_name)
 
         time_written = 0
