@@ -101,6 +101,7 @@ def main(cli_args=None):
     out_file += "+{}files".format(len(cli_args.target) - 1) if len(cli_args.target) > 1 else ''
 
     logging.debug('Output path, file, extension: "{}", "{}", "{}"'.format(out_path, out_file, out_ext))
+    logging.info(cli_args.zero_dead_channels)
 
     time_written = 0
     for cg_id, channel_group in channel_groups.items():

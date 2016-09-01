@@ -25,8 +25,6 @@ def gather_files(input_directory, channels, proc_node, template=NAME_TEMPLATE):
     except AssertionError:
         print(IOError("Input files not found: {}".format([f for f, exists in is_file.items() if not exists])))
         sys.exit(1)
-    # assert all([f for f in file_names if op.isfile(f)]) == len(file_names)
-    logging.debug('File names gathered: {}'.format(file_names))
     return file_names
 
 

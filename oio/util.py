@@ -56,7 +56,7 @@ def channel_ranges(channel_list):
     return ranges
 
 
-def fmt_channel_ranges(channels, shorten_seq=5, rs="tm", cs="_", zp=2):
+def fmt_channel_ranges(channels, shorten_seq=5, rs="tm", c_sep="_", zp=2):
     """String of channel numbers separated with delimiters with consecutive channels
     are shortened when sequence length above threshold.
 
@@ -64,19 +64,19 @@ def fmt_channel_ranges(channels, shorten_seq=5, rs="tm", cs="_", zp=2):
         channels: list of channels
         shorten_seq: number of consecutive channels to be shortened. (default: 5)
         rs: range delimiter (default: 'tm')
-        cs: channel delimiter (default: '_')
+        c_sep: channel delimiter (default: '_')
         zp: zero pad channel numbers (default: 2)
 
     Returns: String of channels in order they appeared in the list of channels.
 
     Example: fmt_channel_ranges([[1], [3], [5, 6, 7, 8, 9, 10]]) -> 01_03_05tm10
     """
-    cr = channel_ranges(channels)
-    range_strings = [cs.join(["{c:0{zp}}".format(c=c, zp=zp) for c in cr])
-                     if len(c) < shorten_seq
-                     else "{start:0{zp}}{rs}{end:0{zp}}".format(start=c[0], end=c[-1], rs=rs, zp=zp)
-                     for c in cr]
-    return cs.join(range_strings)
+    c_ranges = channel_ranges(channels)
+    range_strings = [c_sep.join(["{c:0{zp}}".format(c=c, zp=zp) for c in c_seq])
+                     if len(c_seq) < shorten_seq
+                     else "{start:0{zp}}{rs}{end:0{zp}}".format(start=c_seq[0], end=c_seq[-1], rs=rs, zp=zp)
+                     for c_seq in c_ranges]
+    return c_sep.join(range_strings)
 
 
 def fmt_time(s, minimal=True):

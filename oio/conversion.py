@@ -53,6 +53,7 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
     data_channels = [cid + 1 for cid in channel_group['channels']]
     ref_channels = [rid + 1 for rid in channel_group['reference']] if "reference" in channel_group else []
     dead_channels = [did + 1 for did in dead_channels]
+    logger.info("Dead channels to zero: {}, {}".format(zero_dead_channels, dead_channels))
 
     dead_channels_indices = [data_channels.index(dc) for dc in dead_channels if dc in data_channels]
 
@@ -91,7 +92,6 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
 
             # loop over all records, in chunk sizes
             bytes_written = 0
-            count = 0
             while records_left:
                 count = min(records_left, chunk_records)
 
