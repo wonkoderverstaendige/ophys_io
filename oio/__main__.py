@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import sys
+# import sys
 import warnings
 import logging
 import os
@@ -19,6 +19,69 @@ except:
     version = "Unknown"
 
 WRITE_DATA = True
+
+
+def get_needed_channels(cli_args=None):
+    """
+    gets a list of channels that are needed in order to process a given channel
+    """
+    if cli_args is None:
+        import argparse
+        parser = argparse.ArgumentParser(description=get_needed_channels.__doc__)
+        parser.add_argument('probe_file', nargs=1,
+                            help="""the probe file to be used""")
+        parser.add_argument("groups", nargs='+',
+                            help="""a list of groups""")
+        parser.add_argument("-f", "--filenames", action='store_true',
+                            help="""returns a list of open-ephys continuous filenames, instead of a list of channel
+                                    numbers""")
+        parser.add_argument("-n", "--node", type=int,
+                            help="""a node number for the filenames (default 100)""")
+        parser.add_argument("--zerobased", action='store_true',
+                            help="use klusta zero-based convention instead of open-ephys 1-based one")
+        cli_args = parser.parse_args()
+
+    probe_file = cli_args.probe_file[0]
+    groups = [int(g) for g in cli_args.groups]
+
+    do_filenames = False
+    if cli_args.filenames:
+        do_filenames = True
+
+    if cli_args.node:
+        node = cli_args.node
+        do_filenames = True
+    else:
+        node = 100
+
+    zero_based = False
+    if cli_args.zerobased:
+        zero_based = True
+
+    layout = util.run_prb(probe_file)
+
+    chans = []
+    for g in groups:
+        chans.extend(layout['channel_groups'][g]['channels'])
+        if 'reference' in layout['channel_groups']:
+            chans.extend(layout['channel_groups'][g]['reference'])
+
+    if 'ref_a' in layout:
+        chans.extend(layout['ref_a'])
+
+    if 'ref_b' in layout:
+        chans.extend(layout['ref_b'])
+
+
+    if not zero_based:
+        chans = [c + 1 for c in chans]
+    chans = set(chans)
+
+    if do_filenames:
+        filenames = [str(node) + '_CH' + str(c) + '.continuous' for c in chans]
+        print('\n'.join(filenames))
+    else:
+        print(' '.join(map(str, chans)))
 
 
 def main(cli_args=None):
@@ -56,6 +119,8 @@ def main(cli_args=None):
         parser.add_argument("--remove-trailing-zeros", action='store_true')
         parser.add_argument("--dry-run", action='store_true')
         parser.add_argument("-z", "--zero-dead-channels", action='store_true')
+        parser.add_argument("-g", "--channel-groups", type=int, nargs="+",
+                            help="limit to only a subset of the channel groups")
         cli_args = parser.parse_args()
 
     log_level = logging.DEBUG if cli_args.verbose else logging.INFO
@@ -75,12 +140,21 @@ def main(cli_args=None):
     elif cli_args.channel_list is not None:
         channel_groups = {0: {'channels': cli_args.channel_list}}
     elif cli_args.layout is not None:
+
         layout = util.run_prb(cli_args.layout)
         channel_groups = layout['channel_groups']
         dead_channels = layout['dead_channels'] if 'dead_channels' in layout else []
+        if cli_args.channel_groups:
+            channel_groups = {i: channel_groups[i] for i in cli_args.channel_groups if i in channel_groups}
+
     else:
         warnings.warn('No channels given, using all found in target directory.')
         raise NotImplementedError('Grabbing all channels from file names not done yet. Sorry.')
+
+    prm_in_file = None
+    if cli_args.params is not None:
+        prm_in_file = cli_args.params
+
 
     # involved file names
     if cli_args.output is None:
@@ -136,7 +210,12 @@ def main(cli_args=None):
             prb_out.write('channel_groups = {}'.format(pprint.pformat(cg_dict)))
 
         with open(op.join(out_path, output_base_name + '.prm'), 'w') as prm_out:
-            prm_in = pkgr.resource_string('config', 'default.prm').decode()
+            if prm_in_file:
+                f = open(prm_in_file, 'r')
+                prm_in = f.read()
+                f.close()
+            else:
+                prm_in = pkgr.resource_string('config', 'default.prm').decode()
             prm_out.write(prm_in.format(experiment_name=output_base_name,
                                         probe_file=output_base_name + '.prb',
                                         raw_file=output_file_path,

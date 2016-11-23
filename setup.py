@@ -20,4 +20,5 @@ setup(description='OpenEphys IO tools',
       entry_points="""
         [console_scripts]
         oio=oio.__main__:main
+        get_needed_channels=oio.__main__:get_needed_channels
       """)
