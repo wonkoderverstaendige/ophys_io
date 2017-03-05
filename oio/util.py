@@ -24,6 +24,16 @@ def run_prb(path):
     metadata = {k.lower(): v for (k, v) in metadata.items()}
     return metadata
 
+def flat_channel_list(path, exclude_dead=False):
+    prb = run_prb(path)
+    # Channel Order Shenanigans
+    channels = sum([prb['channel_groups'][cg]['channels'] for cg in sorted(prb['channel_groups'])], [])
+    dead_channels_idx = sorted([channels.index(dc) for dc in prb['dead_channels']])
+    idx_sans_dead = [c for c in range(64) if c not in dead_channels_idx]
+
+    print('dead channels:', prb['dead_channels'])
+    print('dead indices :', dead_channels_idx)  # exclude those for subtraction calculations
+    return channels if not exclude_dead else idx_sans_dead
 
 def make_prb(path, stuff):
     raise NotImplementedError
