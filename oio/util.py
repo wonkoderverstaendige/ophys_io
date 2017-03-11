@@ -24,14 +24,19 @@ def run_prb(path):
     metadata = {k.lower(): v for (k, v) in metadata.items()}
     return metadata
 
-def flat_channel_list(path, exclude_dead=False):
-    prb = run_prb(path)
-    # Channel Order Shenanigans
-    channels = sum([prb['channel_groups'][cg]['channels'] for cg in sorted(prb['channel_groups'])], [])
-    dead_channels_idx = sorted([channels.index(dc) for dc in prb['dead_channels']])
-    idx_sans_dead = [c for c in range(64) if c not in dead_channels_idx]
+def flat_channel_list(prb):
+    """Flat lists of all channels and bad channels given a probe dictionary.
 
-    return channels if not exclude_dead else idx_sans_dead
+    Args:
+        path: Path to probe file.
+
+    Returns:
+        Tuple of lists of channels.
+    """
+    channels = sum([prb['channel_groups'][cg]['channels'] for cg in sorted(prb['channel_groups'])], [])
+    dead_channels = prb['dead_channels']
+
+    return channels, dead_channels
 
 def make_prb(path, stuff):
     raise NotImplementedError

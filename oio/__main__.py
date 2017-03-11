@@ -107,7 +107,7 @@ def main(cli_args=None):
 
         parser.add_argument("-d", "--dead-channels", nargs='*', type=int,
                             help="List of dead channels. If flag set, these will be set to zero.")
-        parser.add_argument("-S", "--split-groups", action="store_false",
+        parser.add_argument("-S", "--split-groups", action="store_true",
                             help="Split channel groups into separate files.")
         parser.add_argument("-n", "--proc-node", help="Processor node id", type=int, default=100)
         parser.add_argument("-p", "--params", help="Path to .params file.")
@@ -140,13 +140,18 @@ def main(cli_args=None):
     elif cli_args.channel_list is not None:
         channel_groups = {0: {'channels': cli_args.channel_list}}
     elif cli_args.layout is not None:
-
         layout = util.run_prb(cli_args.layout)
-        channel_groups = layout['channel_groups']
-        dead_channels = layout['dead_channels'] if 'dead_channels' in layout else []
-        if cli_args.channel_groups:
-            channel_groups = {i: channel_groups[i] for i in cli_args.channel_groups if i in channel_groups}
-
+        if cli_args.split_groups:
+            channel_groups = layout['channel_groups']
+            dead_channels = layout['dead_channels'] if 'dead_channels' in layout else []
+            if cli_args.channel_groups:
+                channel_groups = {i: channel_groups[i] for i in cli_args.channel_groups if i in channel_groups}
+        else:
+            channels, dead_channels = util.flat_channel_list(layout)
+            logging.warning('Not splitting groups! {}, ')
+            # make a new channel group by merging in the existing ones
+            channel_groups = {0: {'channels': channels,
+                                  'dead_channels': dead_channels}}
     else:
         warnings.warn('No channels given, using all found in target directory.')
         raise NotImplementedError('Grabbing all channels from file names not done yet. Sorry.')
