@@ -3,6 +3,13 @@ import os.path as op
 import warnings
 from collections import Counter
 
+DEFAULT_LIMIT = 0.512  # GB
+
+
+def get_batch_size(arr, ram_limit_gb=DEFAULT_LIMIT):
+    """Return batch size, number of full batches and remainder size for 2D array."""
+    batch_size = int(ram_limit_gb*1e9/arr.shape[1]/arr.dtype.itemsize)
+    return batch_size, arr.shape[0]//batch_size, arr.shape[0]%batch_size
 
 def run_prb(path):
     """Execute the .prb probe file and import resulting locals return results as dict.
