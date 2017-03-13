@@ -11,7 +11,7 @@ import pkg_resources as pkgr
 import pprint
 
 from oio import util
-from oio.conversion import continuous_to_dat
+from oio.convert import continuous_to_dat
 
 try:
     version = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
@@ -129,9 +129,9 @@ def main(cli_args=None):
 
     if cli_args.remove_trailing_zeros:
         raise NotImplementedError("Can't remove trailing zeros just yet.")
-    if cli_args.split_groups:
-        # i.e. use the -S flag pretty please and fix this later. Some day. Mayhaps-ish.
-        raise NotImplementedError("Explicit channel group merging not supported. Defaulting to split groups.")
+    # if cli_args.split_groups:
+    #     # i.e. use the -S flag pretty please and fix this later. Some day. Mayhaps-ish.
+    #     raise NotImplementedError("Explicit channel group merging not supported. Defaulting to split groups.")
 
     # Set up channel layout (channels, references, dead channels) from command line inputs or layout file
     dead_channels = cli_args.dead_channels if cli_args.dead_channels is not None else []
@@ -209,10 +209,14 @@ def main(cli_args=None):
 
         # create the per-group .prb and .prm files
         with open(op.join(out_path, output_base_name + '.prb'), 'w') as prb_out:
-            cg_dict = {cg_id: channel_group}
-            if cli_args.zero_dead_channels:
-                cg_dict[cg_id]['dead_channels'] = [dc for dc in dead_channels if dc in channel_group['channels']]
-            prb_out.write('channel_groups = {}'.format(pprint.pformat(cg_dict)))
+            # cg_out = {cg_id: channel_group}
+            # if cli_args.zero_dead_channels:
+            #     cg_out[cg_id]['dead_channels'] = [dc for dc in dead_channels if dc in channel_group['channels']]
+            ch_out = channel_group['channels']
+            cg_out = {0:
+                          {'channels': list(range(len(ch_out))),
+                           'dead_channels': sorted([ch_out.index(dc) for dc in dead_channels if dc in ch_out])}}
+            prb_out.write('channel_groups = {}'.format(pprint.pformat(cg_out)))
 
         with open(op.join(out_path, output_base_name + '.prm'), 'w') as prm_out:
             if prm_in_file:
