@@ -9,7 +9,7 @@ logger = logging.getLogger(__file__)
 
 
 def ref(dat_path, ref_path=None, *args, **kwargs):
-    if ref_path == None:
+    if ref_path is None:
         logger.debug('Creating reference...')
         ref_path = make_ref_file(dat_path, *args, **kwargs)
         logger.debug('Reference file at {}'.format(ref_path))
@@ -20,7 +20,7 @@ def ref(dat_path, ref_path=None, *args, **kwargs):
 
 
 def subtract_reference(dat_path, ref_path, precision='single', inplace=False,
-                       n_channels=64, ch_idx_bad=None, zero_bad_channels=False, *args, **kwargs):
+                       n_channels=64, ch_idx_bad=None, zero_bad_channels=False):
     # if inplace, just overwrite, in_file, else, make copy of in_file
     # FIXME: Also memmap the reference file? Should be small even for long recordings...
     # FIXME: If not inplace, the file should be opened read only!
@@ -70,7 +70,7 @@ def make_ref_file(dat_path, n_channels, ref_out_fname=None, *args, **kwargs):
     return ref_out_fname
 
 
-def _batch_reference(arr_like, out_file, ch_idx_good=None, ch_idx_bad=None, precision='float32', *args, **kwargs):
+def _batch_reference(arr_like, out_file, ch_idx_good=None, ch_idx_bad=None, precision='float32'):
     # out_file is file pointer!
     batch_size, n_batches, batch_size_last = get_batch_size(arr_like)
     assert not (ch_idx_good is not None and ch_idx_bad is not None)

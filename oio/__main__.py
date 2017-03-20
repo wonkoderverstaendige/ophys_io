@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# import sys
 import warnings
 import logging
 import os
@@ -15,30 +14,29 @@ from oio.convert import continuous_to_dat
 
 try:
     version = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
-except:
+except subprocess.CalledProcessError as e:
     version = "Unknown"
 
 WRITE_DATA = True
 
 
 def get_needed_channels(cli_args=None):
-    """
-    gets a list of channels that are needed in order to process a given channel
+    """Gets a list of channels that are needed in order to process a given channel.
     """
     if cli_args is None:
         import argparse
         parser = argparse.ArgumentParser(description=get_needed_channels.__doc__)
         parser.add_argument('probe_file', nargs=1,
-                            help="""the probe file to be used""")
+                            help="""Phe probe file to be used""")
         parser.add_argument("groups", nargs='+',
-                            help="""a list of groups""")
+                            help="""A list of groups""")
         parser.add_argument("-f", "--filenames", action='store_true',
-                            help="""returns a list of open-ephys continuous filenames, instead of a list of channel
+                            help="""Returns a list of open-ephys continuous filenames, instead of a list of channel
                                     numbers""")
         parser.add_argument("-n", "--node", type=int,
-                            help="""a node number for the filenames (default 100)""")
+                            help="""A node number for the filenames (default 100)""")
         parser.add_argument("--zerobased", action='store_true',
-                            help="use klusta zero-based convention instead of open-ephys 1-based one")
+                            help="Use klusta zero-based convention instead of open-ephys 1-based one")
         cli_args = parser.parse_args()
 
     probe_file = cli_args.probe_file[0]
@@ -60,28 +58,27 @@ def get_needed_channels(cli_args=None):
 
     layout = util.run_prb(probe_file)
 
-    chans = []
+    channels = []
     for g in groups:
-        chans.extend(layout['channel_groups'][g]['channels'])
+        channels.extend(layout['channel_groups'][g]['channels'])
         if 'reference' in layout['channel_groups']:
-            chans.extend(layout['channel_groups'][g]['reference'])
+            channels.extend(layout['channel_groups'][g]['reference'])
 
     if 'ref_a' in layout:
-        chans.extend(layout['ref_a'])
+        channels.extend(layout['ref_a'])
 
     if 'ref_b' in layout:
-        chans.extend(layout['ref_b'])
-
+        channels.extend(layout['ref_b'])
 
     if not zero_based:
-        chans = [c + 1 for c in chans]
-    chans = set(chans)
+        channels = [c + 1 for c in channels]
+    channels = set(channels)
 
     if do_filenames:
-        filenames = [str(node) + '_CH' + str(c) + '.continuous' for c in chans]
-        print('\n'.join(filenames))
+        fnames = [str(node) + '_CH' + str(c) + '.continuous' for c in channels]
+        print('\n'.join(fnames))
     else:
-        print(' '.join(map(str, chans)))
+        print(' '.join(map(str, channels)))
 
 
 def main(cli_args=None):
@@ -160,7 +157,6 @@ def main(cli_args=None):
     if cli_args.params is not None:
         prm_in_file = cli_args.params
 
-
     # involved file names
     if cli_args.output is None:
         out_path, out_file, out_ext = '', op.basename(op.splitext(cli_args.target[0])[0]), "dat"
@@ -213,9 +209,8 @@ def main(cli_args=None):
             # if cli_args.zero_dead_channels:
             #     cg_out[cg_id]['dead_channels'] = [dc for dc in dead_channels if dc in channel_group['channels']]
             ch_out = channel_group['channels']
-            cg_out = {0:
-                          {'channels': list(range(len(ch_out))),
-                           'dead_channels': sorted([ch_out.index(dc) for dc in dead_channels if dc in ch_out])}}
+            cg_out = {0: {'channels': list(range(len(ch_out))),
+                          'dead_channels': sorted([ch_out.index(dc) for dc in dead_channels if dc in ch_out])}}
             prb_out.write('channel_groups = {}'.format(pprint.pformat(cg_out)))
 
         with open(op.join(out_path, output_base_name + '.prm'), 'w') as prm_out:

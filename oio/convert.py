@@ -37,7 +37,6 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
     of an open ephys [proc_node] into single [outfile] .dat file.
     Data is transferred in batches of [chunk_records] 2kiB records per channel.
     """
-
     start_t = time.time()
     logger = logging.getLogger(output_path)
     file_handler = logging.FileHandler(output_path + '.log', mode=file_mode)
@@ -87,9 +86,6 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
                                " Skipping target.".format(duration*1000, epsilon))
                 return 0
 
-            # # preallocate temporary storage
-            # buf = oe.make_buffer(len(data_channels), chunk_records)
-
             # loop over all records, in chunk sizes
             bytes_written = 0
             while records_left:
@@ -112,23 +108,6 @@ def continuous_to_dat(input_path, output_path, channel_group, proc_node=100,
                         res[dci] = zeros
 
                 res.transpose().tofile(out_fid_dat)
-
-                # offset = num_records - records_left
-
-                # # load chunk of data from all channels
-                # for n, fname in enumerate(file_paths):
-                #     buf[n, 0:count * oe.NUM_SAMPLES] = oe.read_records(fname, record_count=count,
-                #                                                        record_offset=offset)['samples'].ravel()
-                #     out_fid_log.write(DEBUG_STR_CHUNK.format(filename=fname, count=count,
-                #                                            start=offset, end=offset + count - 1))
-                #
-                #     # write chunk of interleaved data
-                #     if count == chunk_records:
-                #         buf.transpose().tofile(out_fid_dat)
-                #     else:
-                #         # We don't want to write the trailing zeros on the last chunk
-                #         buf[:, 0:count * oe.NUM_SAMPLES].transpose().tofile(out_fid_dat)
-                #         out_fid_log.write('\n')
 
                 records_left -= count
                 bytes_written += (count * 2048 * len(data_channels))
