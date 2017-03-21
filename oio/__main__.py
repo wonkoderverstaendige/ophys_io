@@ -12,73 +12,15 @@ import pprint
 from oio import util
 from oio.convert import continuous_to_dat
 
+current_path = os.getcwd()
 try:
-    version = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
+    os.chdir(op.dirname(__file__))
+    GIT_VERSION = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
 except subprocess.CalledProcessError as e:
-    version = "Unknown"
+    GIT_VERSION = "Unknown"
+os.chdir(current_path)
 
 WRITE_DATA = True
-
-
-def get_needed_channels(cli_args=None):
-    """Gets a list of channels that are needed in order to process a given channel.
-    """
-    if cli_args is None:
-        import argparse
-        parser = argparse.ArgumentParser(description=get_needed_channels.__doc__)
-        parser.add_argument('probe_file', nargs=1,
-                            help="""Phe probe file to be used""")
-        parser.add_argument("groups", nargs='+',
-                            help="""A list of groups""")
-        parser.add_argument("-f", "--filenames", action='store_true',
-                            help="""Returns a list of open-ephys continuous filenames, instead of a list of channel
-                                    numbers""")
-        parser.add_argument("-n", "--node", type=int,
-                            help="""A node number for the filenames (default 100)""")
-        parser.add_argument("--zerobased", action='store_true',
-                            help="Use klusta zero-based convention instead of open-ephys 1-based one")
-        cli_args = parser.parse_args()
-
-    probe_file = cli_args.probe_file[0]
-    groups = [int(g) for g in cli_args.groups]
-
-    do_filenames = False
-    if cli_args.filenames:
-        do_filenames = True
-
-    if cli_args.node:
-        node = cli_args.node
-        do_filenames = True
-    else:
-        node = 100
-
-    zero_based = False
-    if cli_args.zerobased:
-        zero_based = True
-
-    layout = util.run_prb(probe_file)
-
-    channels = []
-    for g in groups:
-        channels.extend(layout['channel_groups'][g]['channels'])
-        if 'reference' in layout['channel_groups']:
-            channels.extend(layout['channel_groups'][g]['reference'])
-
-    if 'ref_a' in layout:
-        channels.extend(layout['ref_a'])
-
-    if 'ref_b' in layout:
-        channels.extend(layout['ref_b'])
-
-    if not zero_based:
-        channels = [c + 1 for c in channels]
-    channels = set(channels)
-
-    if do_filenames:
-        fnames = [str(node) + '_CH' + str(c) + '.continuous' for c in channels]
-        print('\n'.join(fnames))
-    else:
-        print(' '.join(map(str, channels)))
 
 
 def main(cli_args=None):
@@ -122,7 +64,7 @@ def main(cli_args=None):
 
     log_level = logging.DEBUG if cli_args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format='%(asctime)s %(message)s')
-    logging.info('Starting conversion with OIO git version {}'.format(version))
+    logging.info('Starting conversion with OIO git version {}'.format(GIT_VERSION))
 
     if cli_args.remove_trailing_zeros:
         raise NotImplementedError("Can't remove trailing zeros just yet.")

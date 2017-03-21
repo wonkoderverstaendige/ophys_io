@@ -2,15 +2,31 @@ from six import exec_
 import os.path as op
 import warnings
 from collections import Counter
+from .formats import open_ephys, kwik, dat
+import logging
 
 DEFAULT_LIMIT = 0.512  # GB
 
+logger = logging.getLogger(__name__)
 
 def get_batch_size(arr, ram_limit_gb=DEFAULT_LIMIT):
     """Return batch size, number of full batches and remainder size for 2D array."""
     batch_size = int(ram_limit_gb * 1e9 / arr.shape[1] / arr.dtype.itemsize)
     return batch_size, arr.shape[0] // batch_size, arr.shape[0] % batch_size
 
+def detect_format(path):
+    formats = [f for f in [fmt.detect(path) for fmt in [open_ephys, dat, kwik]] if f is not None]
+    if len(formats) == 1:
+        fmt = formats[0]
+        if 'DAT' in fmt:
+            if fmt == 'DAT-File':
+                return dat
+        else:
+            if 'kwik' in fmt:
+                return kwik
+            else:
+                return open_ephys
+    logger.info('Detected format(s) {} not valid.'.format(formats))
 
 def run_prb(path):
     """Execute the .prb probe file and import resulting locals return results as dict.
@@ -121,3 +137,64 @@ def fmt_time(s, minimal=True):
 
     h, m = divmod(m, 60)
     return "{h:02d}h {m:02d}min {s:02.3f}s".format(h=h, m=m, s=s + ms)
+
+
+def get_needed_channels(cli_args=None):
+    """Gets a list of channels that are needed in order to process a given channel.
+    """
+    if cli_args is None:
+        import argparse
+        parser = argparse.ArgumentParser(description=get_needed_channels.__doc__)
+        parser.add_argument('probe_file', nargs=1,
+                            help="""Phe probe file to be used""")
+        parser.add_argument("groups", nargs='+',
+                            help="""A list of groups""")
+        parser.add_argument("-f", "--filenames", action='store_true',
+                            help="""Returns a list of open-ephys continuous filenames, instead of a list of channel
+                                    numbers""")
+        parser.add_argument("-n", "--node", type=int,
+                            help="""A node number for the filenames (default 100)""")
+        parser.add_argument("--zerobased", action='store_true',
+                            help="Use klusta zero-based convention instead of open-ephys 1-based one")
+        cli_args = parser.parse_args()
+
+    probe_file = cli_args.probe_file[0]
+    groups = [int(g) for g in cli_args.groups]
+
+    do_filenames = False
+    if cli_args.filenames:
+        do_filenames = True
+
+    if cli_args.node:
+        node = cli_args.node
+        do_filenames = True
+    else:
+        node = 100
+
+    zero_based = False
+    if cli_args.zerobased:
+        zero_based = True
+
+    layout = run_prb(probe_file)
+
+    channels = []
+    for g in groups:
+        channels.extend(layout['channel_groups'][g]['channels'])
+        if 'reference' in layout['channel_groups']:
+            channels.extend(layout['channel_groups'][g]['reference'])
+
+    if 'ref_a' in layout:
+        channels.extend(layout['ref_a'])
+
+    if 'ref_b' in layout:
+        channels.extend(layout['ref_b'])
+
+    if not zero_based:
+        channels = [c + 1 for c in channels]
+    channels = set(channels)
+
+    if do_filenames:
+        fnames = [str(node) + '_CH' + str(c) + '.continuous' for c in channels]
+        print('\n'.join(fnames))
+    else:
+        print(' '.join(map(str, channels)))
