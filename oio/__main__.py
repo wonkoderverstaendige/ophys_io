@@ -11,14 +11,7 @@ import pprint
 
 from oio import util
 from oio.convert import continuous_to_dat
-
-current_path = os.getcwd()
-try:
-    os.chdir(op.dirname(__file__))
-    GIT_VERSION = subprocess.check_output(["git", "describe", "--always"]).strip().decode('utf-8')
-except subprocess.CalledProcessError as e:
-    GIT_VERSION = "Unknown"
-os.chdir(current_path)
+from . import GIT_VERSION
 
 WRITE_DATA = True
 
