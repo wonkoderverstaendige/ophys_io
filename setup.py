@@ -2,15 +2,12 @@ try:
     from setuptools import setup
 except ImportError:
     from distutils.core import setup
-
-config = {
-
-}
+import oio
 
 setup(description='OpenEphys IO tools',
       author='Ronny Eichler',
       author_email='ronny.eichler@gmail.com',
-      version='0.1.2dev',
+      version=oio.__version__,
       license='MIT',
       install_requires=['nose', 'numpy', 'six', 'click', 'tqdm'],
       packages=['oio'],
@@ -20,5 +17,5 @@ setup(description='OpenEphys IO tools',
       entry_points="""
         [console_scripts]
         oio=oio.__main__:main
-        get_needed_channels=oio.__main__:get_needed_channels
+        get_needed_channels=oio.util:get_needed_channels
       """)
