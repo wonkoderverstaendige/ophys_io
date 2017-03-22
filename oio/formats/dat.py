@@ -5,6 +5,8 @@ import logging
 from .open_ephys import NUM_SAMPLES
 
 FMT_NAME = 'DAT'
+FMT_FEXT = '.dat'
+
 DEFAULT_DTYPE = 'int16'
 DEFAULT_ITEMSIZE = 2
 DEFAULT_SAMPLING_RATE = 3e4

@@ -7,6 +7,7 @@ from ..lib.tools import fext, path_content
 import logging
 
 FMT_NAME = 'Kwik'
+FMT_FEXT = '.kwik'
 
 logger = logging.getLogger(__name__)
 

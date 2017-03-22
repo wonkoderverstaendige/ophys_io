@@ -9,6 +9,7 @@ import numpy as np
 import logging
 
 FMT_NAME = 'OE'
+FMT_FEXT = '.continuous'
 
 SIZE_HEADER = 1024  # size of header in B
 NUM_SAMPLES = 1024  # number of samples per record
