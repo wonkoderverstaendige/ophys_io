@@ -9,10 +9,12 @@ DEFAULT_LIMIT = 0.512  # GB
 
 logger = logging.getLogger(__name__)
 
+
 def get_batch_size(arr, ram_limit_gb=DEFAULT_LIMIT):
     """Return batch size, number of full batches and remainder size for 2D array."""
     batch_size = int(ram_limit_gb * 1e9 / arr.shape[1] / arr.dtype.itemsize)
     return batch_size, arr.shape[0] // batch_size, arr.shape[0] % batch_size
+
 
 def detect_format(path):
     formats = [f for f in [fmt.detect(path) for fmt in [open_ephys, dat, kwik]] if f is not None]
@@ -27,6 +29,7 @@ def detect_format(path):
             else:
                 return open_ephys
     logger.info('Detected format(s) {} not valid.'.format(formats))
+
 
 def run_prb(path):
     """Execute the .prb probe file and import resulting locals return results as dict.
@@ -63,6 +66,7 @@ def flat_channel_list(prb):
 
     return channels, dead_channels
 
+
 def monotonic_prb(prb):
     """Return probe file dict with monotonically increasing channel group and channel numbers."""
     # FIXME: Should otherwise copy any other fields over (unknown fields warning)
@@ -71,15 +75,17 @@ def monotonic_prb(prb):
     groups = prb['channel_groups']
     monotonic = {}
     for n, chg in enumerate(groups.keys()):
-        monotonic[n] = list(range(chan_n, chan_n + len(groups[chg]['channels'])))
+        monotonic[n] = {'channels': list(range(chan_n, chan_n + len(groups[chg]['channels'])))}
         chan_n += len(groups[chg]['channels'])
-    ret_dict = {'channel_groups': monotonic}
 
     # correct bad channel indices
     if 'dead_channels' in prb.keys():
         fcl, fbc = flat_channel_list(prb)
-        ret_dict['dead_channels'] = sorted([fcl.index(bc) for bc in fbc])
-    return ret_dict
+        dead_channels = sorted([fcl.index(bc) for bc in fbc])
+    else:
+        dead_channels = []
+    return monotonic, dead_channels
+
 
 def make_prb():
     raise NotImplementedError
