@@ -63,6 +63,23 @@ def flat_channel_list(prb):
 
     return channels, dead_channels
 
+def monotonic_prb(prb):
+    """Return probe file dict with monotonically increasing channel group and channel numbers."""
+    # FIXME: Should otherwise copy any other fields over (unknown fields warning)
+    # FIXME: Correct ref like dc to indices
+    chan_n = 0
+    groups = prb['channel_groups']
+    monotonic = {}
+    for n, chg in enumerate(groups.keys()):
+        monotonic[n] = list(range(chan_n, chan_n + len(groups[chg]['channels'])))
+        chan_n += len(groups[chg]['channels'])
+    ret_dict = {'channel_groups': monotonic}
+
+    # correct bad channel indices
+    if 'dead_channels' in prb.keys():
+        fcl, fbc = flat_channel_list(prb)
+        ret_dict['dead_channels'] = sorted([fcl.index(bc) for bc in fbc])
+    return ret_dict
 
 def make_prb():
     raise NotImplementedError
