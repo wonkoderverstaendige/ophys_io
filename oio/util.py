@@ -2,6 +2,7 @@ from six import exec_
 import os.path as op
 import warnings
 from collections import Counter
+import pkg_resources as pkgr
 from .formats import open_ephys, kwik, dat
 import logging
 
@@ -101,8 +102,17 @@ def make_prb():
     raise NotImplementedError
 
 
-def make_prm():
-    raise NotImplementedError
+def make_prm(dat_path, prb_path, n_channels=4):
+    prm_in = pkgr.resource_string('config', 'default.prm').decode()
+    #
+    # with open('default.prm', 'r') as prm_default:
+    #     template = prm_default.read()
+
+    base_name, _ = op.splitext(dat_path)
+    with open(base_name + '.prm', 'w') as prm_out:
+        prm_out.write(prm_in.format(experiment_name=base_name,
+                                    probe_file=prb_path,
+                                    n_channels=4))
 
 
 def has_prb(path):
