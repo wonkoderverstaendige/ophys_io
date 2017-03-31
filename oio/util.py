@@ -12,11 +12,18 @@ logger = logging.getLogger(__name__)
 
 def get_batch_size(arr, ram_limit_gb=DEFAULT_LIMIT):
     """Return batch size, number of full batches and remainder size for 2D array."""
+
     batch_size = int(ram_limit_gb * 1e9 / arr.shape[1] / arr.dtype.itemsize)
     return batch_size, arr.shape[0] // batch_size, arr.shape[0] % batch_size
 
 
 def detect_format(path):
+    """Check if/what known data formats are present at the given path and return the module needed to interact with it.
+    
+    :param path: 
+    :return: 
+    """
+
     formats = [f for f in [fmt.detect(path) for fmt in [open_ephys, dat, kwik]] if f is not None]
     if len(formats) == 1:
         fmt = formats[0]
@@ -38,6 +45,7 @@ def run_prb(path):
 
     Returns: Dictionary of channel groups with channel list, geometry and connectivity graph.
     """
+
     if path is None:
         return
 
@@ -61,6 +69,7 @@ def flat_channel_list(prb):
     Returns:
         Tuple of lists of channels.
     """
+
     channels = sum([prb['channel_groups'][cg]['channels'] for cg in sorted(prb['channel_groups'])], [])
     dead_channels = prb['dead_channels']
 
@@ -69,6 +78,7 @@ def flat_channel_list(prb):
 
 def monotonic_prb(prb):
     """Return probe file dict with monotonically increasing channel group and channel numbers."""
+
     # FIXME: Should otherwise copy any other fields over (unknown fields warning)
     # FIXME: Correct ref like dc to indices
     chan_n = 0
@@ -95,6 +105,22 @@ def make_prm():
     raise NotImplementedError
 
 
+def has_prb(path):
+    """Check if file at path has a an accompanying .prb file with the same basename.
+    
+    Args:
+        path: Path to file of interest
+        
+    Returns:
+        Path to .prb file if exists, else None
+    """
+
+    base_path, _ = op.splitext(op.abspath(op.expanduser(path)))
+    probe_path = base_path + '.prb'
+    if op.exists(probe_path) and op.isfile(probe_path):
+        return probe_path
+
+
 def channel_ranges(channel_list):
     """List of channels in to ranges of consecutive channels.
 
@@ -106,6 +132,7 @@ def channel_ranges(channel_list):
 
     Example: channel_ranges([1, 3, 4, 5]) -> [[1], [3, 4, 5]]
     """
+
     duplicates = [c for c, n in Counter(channel_list).items() if n > 1]
     if len(duplicates):
         warnings.warn("Warning: Channel(s) {} listed more than once".format(duplicates))
