@@ -5,7 +5,6 @@ import warnings
 import logging
 import os
 import os.path as op
-import subprocess
 import pkg_resources as pkgr
 import pprint
 
