@@ -16,7 +16,7 @@ NUM_SAMPLES = 1024  # number of samples per record
 SIZE_RECORD = 2070  # total size of record (2x1024 B samples + record header)
 REC_MARKER = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 255], dtype=np.uint8)
 # NAME_TEMPLATE = '{proc_node:}_CH{channel:d}.continuous'
-NAME_TEMPLATE = '{proc_node:}_CH{channel:d}_0.continuous'
+NAME_TEMPLATE = '{proc_node:}_CH{channel:d}_{sub_id:d}.continuous'
 
 
 AMPLITUDE_SCALE = 1 / 2 ** 10
@@ -52,7 +52,7 @@ class DataStreamer(Streamer.Streamer):
 
         channels = range(self.buffer.n_channels)
         self.files = [
-            (channel, os.path.join(self.target_path, FNAME_TEMPLATE.format(self.cfg['FPGA_NODE'], channel + 1)))
+            (channel, os.path.join(self.target_path, NAME_TEMPLATE.format(self.cfg['FPGA_NODE'], channel + 1)))
             for
             channel in channels]
 
@@ -60,18 +60,15 @@ class DataStreamer(Streamer.Streamer):
             data = read_record(sf[1], offset=offset)[:n_samples]
             self.buffer.put_data(data, channel=sf[0])
 
-def gather_files(input_directory, channels, proc_node, template=NAME_TEMPLATE):
-    """Return list of paths to valid input files for the input directory."""
-    file_names = [os.path.join(input_directory, template.format(proc_node=proc_node, channel=chan))
-                  for chan in channels]
+def gather_files(input_directory, channels, proc_node, sub_id=0, template=NAME_TEMPLATE):
+    """Return list of paths to valid input files for the input directory for the given sub-id."""
+    file_names = [os.path.join(input_directory, template.format(proc_node=proc_node, channel=channel, sub_id=sub_id))
+                  for channel in channels]
     is_file = {f: os.path.isfile(f) for f in file_names}
-    try:
-        assert all(is_file.values())
-    except AssertionError:
-        print(IOError("Input files not found: {}".format([f for f, exists in is_file.items() if not exists])))
-        sys.exit(1)
-    print("FILENAMES:", file_names)
-    return file_names
+    if all(is_file.values()):
+        return file_names
+    else:
+        raise(IOError("Input files not found: {}".format([f for f, exists in is_file.items() if not exists])))
 
 def check_headers(files):
     """Check that length, sampling rate, buffer and block sizes of a list of open-ephys ContinuousFiles are
@@ -97,7 +94,7 @@ def fill_buffer(target, buffer, offset, *args, **kwargs):
     node_id = kwargs['node_id']
     for c in channels:
         buffer[c, :] = \
-            read_record(os.path.join(target, FNAME_TEMPLATE.format(
+            read_record(os.path.join(target, NAME_TEMPLATE.format(
                 node_id=node_id,
                 channel=c + 1)),
                         count=count,
@@ -109,16 +106,6 @@ def read_header(filename):
 
     # 1 kiB header string data type
     header = read_segment(filename, offset=0, count=1, dtype=HEADER_DT)
-
-    # Stand back! I know regex!
-    # Annoyingly, there is a newline character missing in the header (version/header_bytes)
-    #
-    # header_str = str(header[0][0]).rstrip(' ')
-    # header_dict = {group[0]: group[1] for group in HEADER_REGEX.findall(header_str)}
-    # for key in ['bitVolts', 'sampleRate']:
-    #     header_dict[key] = float(header_dict[key])
-    # for key in ['blockLength', 'bufferSize', 'header_bytes', 'channel']:
-    #     header_dict[key] = int(header_dict[key] if not key == 'channel' else header_dict[key][2:])
     return fmt_header(header)
 
 
