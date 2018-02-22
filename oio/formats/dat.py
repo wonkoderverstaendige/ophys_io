@@ -54,9 +54,9 @@ def detect(base_path, pre_walk=None):
     """
     root, dirs, files = tools.path_content(base_path) if pre_walk is None else pre_walk
 
-    logger.debug('Detecting in dirs: {}, files: {}'.format(dirs, files))
+    logger.debug('Looking for .dat files'.format(dirs, files))
     dat_files = [f for f in files if tools.fext(f) == '.dat']
-    logger.debug('# Dat files: {}'.format(len(dat_files)))
+    logger.debug('{} .dat files found: {}'.format(len(dat_files), dat_files))
     if not len(dat_files):
         return None
     elif len(dat_files) == 1:
