@@ -196,7 +196,7 @@ def gather_files(target_directory, proc_node, channels='*', channel_type='CH',
 
             sub_files[channel] = {'PROC_NODE': proc_node, 'CHANNEL_TYPE': channel_type, 'CHANNEL': channel,
                                   'FILEPATH': str(file_path), 'FILENAME': filename}
-        files[sid] = sub_files
+        files[sid] = {'FILES': sub_files}
     return files
 
 
@@ -363,10 +363,10 @@ def metadata_from_target(target_dir, channel_type='CH'):
 
     metadata['SUBSETS'] = gather_files(target_dir, metadata['FPGA_NODE'], channel_type=channel_type)
 
-    logger.debug(pformat(metadata, indent=2))
-
-    for sub_id, sub_dict in metadata['SUBSETS'].items():
-        metadata['SUBSETS'][sub_id]['HEADER'] = metadata_from_files(sub_dict['FILES'])
+    for sub_id in metadata['SUBSETS']:
+        for channel, channel_metadata in metadata['SUBSETS'][sub_id]['FILES'].items():
+            channel_metadata.update(metadata_from_file(channel_metadata['FILEPATH']))
+        metadata['SUBSETS'][sub_id]['JOINT_HEADERS'] = reduce_files_metadata(metadata['SUBSETS'][sub_id]['FILES'])
 
     # Check that all headers are the same, then use the set.
 
@@ -377,6 +377,7 @@ def metadata_from_target(target_dir, channel_type='CH'):
     #     n_channels = kwargs['n_channels']
     #
     # md['CHANNELS'] = {'n_channels': n_channels}
+    logger.debug(pformat(metadata, indent=2))
     return metadata
 
 
@@ -406,43 +407,50 @@ def metadata_from_file(file):
                 n_samples=int(n_samples),
                 sampling_rate=fs)
 
+#
+# def metadata_from_files(files):
+#     """Reads header information from open ephys .continuous files.
+#     This returns some "reliable" information of what the acquisition system thinks went down.
+#
+#     Args:
+#         files: List of files
+#
+#     Returns:
+#         Dictionary with n_blocks, block_size, n_samples, sampling_rate fields
+#     """
+#     logger.debug('Extracting metadata from {} files... '.format(len(files)))
+#     metadata_list = [metadata_from_file(f) for f in files]
+#     files_metadata = reduce_files_metadata(metadata_list)
+#     if files_metadata is None:
+#         raise AssertionError
 
-def metadata_from_files(files):
-    """Reads header information from open ephys .continuous files.
-    This returns some "reliable" information of what the acquisition system thinks went down.
 
-    Args:
-        files: List of files
-
-    Returns:
-        Dictionary with n_blocks, block_size, n_samples, sampling_rate fields
-    """
-    logger.debug('Extracting metadata from {} files... '.format(len(files)))
-    metadata_list = [metadata_from_file(f) for f in files]
-    files_metadata = reduce_files_metadata(metadata_list)
-    if files_metadata is None:
-        raise AssertionError
-
-
-def reduce_files_metadata(metadata_list):
+def reduce_files_metadata(files_metadata):
     """Check that length, sampling rate, buffer and block sizes of given files are consistent.
 
     Args:
-        metadata_list: List of metadata dictionaries extracted from file headers/file stats
+        files_metadata: Dictionary of channel metadata dictionaries extracted from file headers/file stats
 
     Returns:
-        Set of metadata when all metadata are the same for all items in the list.
+        Dict of union of metadata sets when all metadata are the same for all items.
     """
-    if not len(metadata_list):
-        raise ValueError("List of metadata empty, can't check nothin' not.")
+    joint_headers = {}
+    singular_items = ['n_samples', 'block_size', 'sampling_rate', 'n_blocks']
 
-    md_sets = {k: set([md[k] for md in metadata_list]) for k in metadata_list[0].keys()}
-    if not all([len(mdl) == 1 for mdl in md_sets.values()]):
-        logging.error(md_sets)
-        raise ValueError('Found non-matching metadata in list of files!')
-    md = {k: tuple(v)[0] for k, v in md_sets.items()}
-    print(md)
-    return md
+    files = list(files_metadata.values())
+    keys = tuple(set([i for f in files for i in f.keys()]))
+    for k in keys:
+        property_set = sorted(list(set([f[k] for f in files])))
+
+        # Check that properties that should be the same for all files in a subset are equal
+        if k in singular_items and len(property_set) > 1:
+            raise ValueError('Found non-singular metadata in {}'.format(k))
+
+        # Singular properties should be reduced to scalar
+        property_set = property_set if len(property_set) > 1 else property_set[0]
+        joint_headers[k] = property_set
+
+    return joint_headers
 
 
 def metadata_from_xml(base_dir):
