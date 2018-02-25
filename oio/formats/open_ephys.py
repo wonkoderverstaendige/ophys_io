@@ -2,11 +2,12 @@
 
 import re
 import os
-import sys
 import xml.etree.ElementTree as ETree
 from ..lib import tools, Streamer
 import numpy as np
 import logging
+from pathlib import Path
+from pprint import pformat
 
 FMT_NAME = 'OE'
 FMT_FEXT = '.continuous'
@@ -14,9 +15,11 @@ FMT_FEXT = '.continuous'
 SIZE_HEADER = 1024  # size of header in B
 NUM_SAMPLES = 1024  # number of samples per record
 SIZE_RECORD = 2070  # total size of record (2x1024 B samples + record header)
+SIZE_DATA = 2 * NUM_SAMPLES
 REC_MARKER = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 255], dtype=np.uint8)
-# NAME_TEMPLATE = '{proc_node:}_CH{channel:d}.continuous'
-NAME_TEMPLATE = '{proc_node:}_CH{channel:d}_{sub_id:d}.continuous'
+
+NAME_TEMPLATE = '{proc_node}_{channel_type}{channel}{sub_id}.continuous'  # sub id: [_0, _1], or none
+# NAME_TEMPLATE_NO_SUB_ID = '{proc_node:}_CH{channel:d}.continuous'
 
 
 AMPLITUDE_SCALE = 1 / 2 ** 10
@@ -35,7 +38,44 @@ DATA_DT = np.dtype([('timestamp', np.int64),  # 8 Byte
                     ('n_samples', np.uint16),  # 2 Byte
                     ('rec_num', np.uint16),  # 2 Byte
                     ('samples', ('>i2', NUM_SAMPLES)),  # 2 Byte each x 1024 typ.
-                    ('rec_mark', (np.uint8, 10))])  # 10 Byte
+                    ('rec_mark', (np.uint8, len(REC_MARKER)))])  # 10 Byte
+
+
+class ContinuousFile:
+    """Single .continuous file. Generates chunks of data."""
+
+    # TODO: Allow record counts and offsets
+
+    def __init__(self, path):
+        self.path = os.path.abspath(os.path.expanduser(path))
+        self.file_size = os.path.getsize(self.path)
+        # Make sure we have full records all the way through
+        assert (self.file_size - SIZE_HEADER) % SIZE_RECORD == 0
+        self.num_records = (self.file_size - SIZE_HEADER) // SIZE_RECORD
+        self.duration = self.num_records
+
+    def __enter__(self):
+        self.header = self._read_header()
+        self.record_dtype = DATA_DT  # data_dt(self.header['blockLength'])
+        self.__fid = open(self.path, 'rb')
+        self.__fid.seek(SIZE_HEADER)
+        return self
+
+    def _read_header(self):
+        return format_header(np.fromfile(self.path, dtype=HEADER_DT, count=1))
+
+    def read_record(self, count=1):
+        buf = np.fromfile(self.__fid, dtype=self.record_dtype, count=count)
+
+        # make sure offsets are likely correct
+        assert np.array_equal(buf[0]['rec_mark'], REC_MARKER)
+        return buf['samples'].reshape(-1)
+
+    def next(self):
+        return self.read_record() if self.__fid.tell() < self.file_size else None
+
+    def __exit__(self, *args):
+        self.__fid.close()
 
 
 class DataStreamer(Streamer.Streamer):
@@ -44,10 +84,11 @@ class DataStreamer(Streamer.Streamer):
         self.target_path = target_path
         logger.debug('Open Ephys Streamer Initialized at {}!'.format(target_path))
         self.cfg = config
+        self.files = None
 
     def reposition(self, offset):
         logger.debug('Rolling to position {}'.format(offset))
-        dtype = np.dtype(self.buffer.np_type)
+        # dtype = np.dtype(self.buffer.np_type)
         n_samples = self.buffer.buffer.shape[1]
 
         channels = range(self.buffer.n_channels)
@@ -60,45 +101,139 @@ class DataStreamer(Streamer.Streamer):
             data = read_record(sf[1], offset=offset)[:n_samples]
             self.buffer.put_data(data, channel=sf[0])
 
-def gather_files(input_directory, channels, proc_node, sub_id=0, template=NAME_TEMPLATE):
-    """Return list of paths to valid input files for the input directory for the given sub-id."""
-    file_names = [os.path.join(input_directory, template.format(proc_node=proc_node, channel=channel, sub_id=sub_id))
-                  for channel in channels]
-    is_file = {f: os.path.isfile(f) for f in file_names}
-    if all(is_file.values()):
-        return file_names
+
+def _ids_from_fname(fn, channel_type='CH'):
+    """Extract channel number and sub_id from a .continuous file of expected form
+    {NODE_ID}_CH{CHANNEL}[_{SUB_ID}].continuous. The underscore is used as indicator of the file name format.
+    Args:
+        fn: Filename
+
+    Returns:
+        Channel number, sub_id
+    """
+    id_str = fn[fn.index(channel_type) + 2:fn.index('.continuous')]
+    if '_' in id_str:
+        # has sub_id
+        sub_id = id_str[id_str.index('_') + 1:]
+        channel = id_str[:id_str.index('_')]
     else:
-        raise(IOError("Input files not found: {}".format([f for f, exists in is_file.items() if not exists])))
+        # no sub_id
+        sub_id = -1
+        channel = id_str
 
-def check_headers(files):
-    """Check that length, sampling rate, buffer and block sizes of a list of open-ephys ContinuousFiles are
-    identical and return them in that order."""
-    # Check oe_file make sense (same size, same sampling rate, etc.
-    num_records = [f.num_records for f in files]
-    sampling_rates = [f.header['sampleRate'] for f in files]
-    buffer_sizes = [f.header['bufferSize'] for f in files]
-    block_sizes = [f.header['blockLength'] for f in files]
+    try:
+        sub_id = int(sub_id)
+        channel = int(channel)
+    except ValueError:
+        raise ValueError("Couldn't parse file name {}, not matching expected pattern.".format(fn))
 
-    assert len(set(num_records)) == 1
-    assert len(set(sampling_rates)) == 1
-    assert len(set(buffer_sizes)) == 1
-    assert len(set(block_sizes)) == 1
-
-    return num_records[0], sampling_rates[0], buffer_sizes[0], block_sizes[0]
+    return sub_id, channel
 
 
-def fill_buffer(target, buffer, offset, *args, **kwargs):
-    count = buffer.shape[1] // NUM_SAMPLES + 1
-    logger.debug('count: {}, buffer: {} '.format(count, buffer.shape))
-    channels = kwargs['channels']
-    node_id = kwargs['node_id']
-    for c in channels:
-        buffer[c, :] = \
-            read_record(os.path.join(target, NAME_TEMPLATE.format(
-                node_id=node_id,
-                channel=c + 1)),
-                        count=count,
-                        offset=offset)[:buffer.shape[1]]
+def gather_files(target_directory, proc_node, channels='*', channel_type='CH',
+                 sub_id=-1, scan_sub_ids=True, template=NAME_TEMPLATE):
+    """Return dictionary of list of paths to valid input files for the input directory, keyed by subset ids.
+    Sub_id is the numerical suffix after channel number in file name, indicating additional recordings
+    subsets in the same data folder. Also checks that all sub_ids have the same number of files.
+    Because that would cause headaches otherwise...
+
+    The annoyance with gathering files here is that we don't know the number of channels or the number of sub_ids.
+    There is no/I don't know a wildcard pattern to catch all channel numbers AND separate the sub_ids, as channel
+    numbers aren't padded. Looks like we'll need to do this "manually". Furthermore, the sub_id may start at _0
+    without non-sufficed companions.
+
+    What we do is to gather up all channel_type matching .continuous files, find the set of sub_ids and channel
+    numbers, then loop over the combination of both and rebuilding those file names. This is kind of backwards,
+    but doesn't require too much prior knowledge of the search space.
+
+    E.g. file names: [100_CH34.continuous, 100_CH34_0.continuous], 100_CH1.continuous, 106_CH1024_59.continuous
+
+    Args:
+        target_directory: path to directory to be scanned
+        proc_node: Processing node origin of files, typically 100
+        channels: Channel number or glob pattern for multiple channels, default all: *
+        channel_type: Type of channel to look for (CH, ADC, AUX). Only one can be used right now.
+
+        sub_id: Starting sub_id. If sub_id is None, no suffix will be appended. Else, numerical.
+        scan_sub_ids: Only scan for a single sub_id, or scan through range incrementally until no files found.
+        template: Glob pattern template for proc_node, channels, sub_id to match .continuous file names.
+
+    Returns: dict {sub_id: {channel: {proc_node: proc_node, channel_type: channel_type, filename:filename}}
+
+    TODO: Channel selection list
+    TODO: Multiple channel types
+    """
+    logger.debug('Gathering .continuous files with template {}'.format(template))
+    logger.debug('Channel type: {}, starting sub_id: {}, channel range: {}, scanning subsets: {}'.format(
+        channel_type, sub_id, channels, scan_sub_ids))
+
+    target_path = Path(target_directory).resolve()
+    files = {}
+
+    # This glob catches ALL channels/sub_ids present in the target directories for the proc_node!
+    glob = template.format(proc_node=proc_node, channel_type=channel_type, channel='*', sub_id='')
+    globbed = [g.name for g in target_path.glob(glob)]
+
+    globbed_sub_ids, globbed_channels = map(tuple, map(set, zip(*[_ids_from_fname(f, channel_type) for f in globbed])))
+    logger.debug('Found sub ids: {}, channels: {}'.format(globbed_sub_ids, globbed_channels))
+
+    # override sub_id search space to singular instance if we aren't scanning them all
+    if not scan_sub_ids:
+        if sub_id not in globbed_sub_ids:
+            raise ValueError('Requested sub_id {} not found in files at target.'.format(sub_id))
+        globbed_sub_ids = [sub_id]
+
+    # Build the return dictionary by building file names from the template and check their existence
+    for sid in sorted(globbed_sub_ids):
+        sub_files = {}
+        for channel in sorted(globbed_channels):
+            filename = template.format(proc_node=proc_node, channel=channel, channel_type=channel_type,
+                                       sub_id='' if sid is -1 else '_{}'.format(sid))
+            file_path = target_path / filename
+            # Check file existence
+            if not file_path.exists():
+                raise FileNotFoundError('Sub_ids and channels not matching up at {}'.format(file_path))
+
+            sub_files[channel] = {'PROC_NODE': proc_node, 'CHANNEL_TYPE': channel_type, 'CHANNEL': channel,
+                                  'FILEPATH': str(file_path), 'FILENAME': filename}
+        files[sid] = sub_files
+    return files
+
+
+# def check_headers(files):
+#     """Check that length, sampling rate, buffer and block sizes of a list of open-ephys ContinuousFiles are
+#     identical and return them in that order."""
+#     # FIXME: Not clear enough this reads only from ContinuousFiles, not raw file paths
+#     raise NotImplemented
+#     # # Check oe_file make sense (same size, same sampling rate, etc.
+#     # num_records = [f.num_records for f in files]
+#     # sampling_rates = [f.header['sampleRate'] for f in files]
+#     # buffer_sizes = [f.header['bufferSize'] for f in files]
+#     # block_sizes = [f.header['blockLength'] for f in files]
+#     #
+#     # assert len(set(num_records)) == 1
+#     # assert len(set(sampling_rates)) == 1
+#     # assert len(set(buffer_sizes)) == 1
+#     # assert len(set(block_sizes)) == 1
+#     #
+#     # return num_records[0], sampling_rates[0], buffer_sizes[0], block_sizes[0]
+
+
+# def fill_buffer(target, buffer, offset, *args, **kwargs):
+#     # count = buffer.shape[1] // NUM_SAMPLES + 1
+#     # logger.debug('count: {}, buffer: {} '.format(count, buffer.shape))
+#     # channels = kwargs['channels']
+#     # node_id = kwargs['node_id']
+#     raise NotImplemented
+#     # CURRENT ISSUE: SHOULD USE GATHER_FILES, NOT IT'S OWN IDEA OF HOW TO FIND FILES!
+#     # for c in channels:
+#     #     buffer[c, :] = \
+#     #         read_record(os.path.join(target, NAME_TEMPLATE.format(
+#     #             node_id=node_id,
+#     #             channel=c + 1)),
+#     #                     count=count,
+#     #                     offset=offset)[:buffer.shape[1]]
+
 
 def read_header(filename):
     """Return dict with .continuous file header content."""
@@ -106,10 +241,18 @@ def read_header(filename):
 
     # 1 kiB header string data type
     header = read_segment(filename, offset=0, count=1, dtype=HEADER_DT)
-    return fmt_header(header)
+    return format_header(header)
 
 
-def fmt_header(header_str):
+def format_header(header_str):
+    """Extract fields from header string and convert into types as needed.
+
+    Args:
+        header_str: String from .continuous file header (first 1024 bytes)
+
+    Returns:
+        header_dict: Dictionary of fields with proper data type.
+    """
     # Stand back! I know regex!
     # Annoyingly, there is a newline character missing in the header_str (version/header_bytes)
     header_str = str(header_str[0][0]).rstrip(' ')
@@ -122,7 +265,7 @@ def fmt_header(header_str):
 
 
 def read_segment(filename, offset, count, dtype):
-    """Read segment of a file from [offset] for [count]x[dtype]"""
+    """Read segment of a file from [offset] for [count]x[dtype] bytes"""
     with open(filename, 'rb') as fid:
         fid.seek(int(offset))
         segment = np.fromfile(fid, dtype=dtype, count=count)
@@ -147,15 +290,14 @@ def detect(base_path, pre_walk=None):
     Returns:
         None if no data set found, else a dict of configuration data from settings.xml
     """
-    # if not os.path.isdir(base_path) and os.path.splitext(base_path)[1]!='.continuous':
-    #     logger.warning('Path {} neither a directory nor a .continuous file.'.format(base_path))
-    #     return None
+    logger.debug('Looking for .continuous data set in {}'.format(base_path))
     root, dirs, files = tools.path_content(base_path) if pre_walk is None else pre_walk
 
     # FIXME: Do once for all files. If single file, indicate
+    # TODO: metadata_from_xml is called twice. Once on detection, once on gathering metadata
     for f in files:
         if tools.fext(f) in ['.continuous']:
-            fv = config_xml(base_path)['INFO']['VERSION']
+            fv = metadata_from_xml(base_path)['INFO']['VERSION']
             return "{}_v{}".format(FMT_NAME, fv if fv else '???')
     else:
         return None
@@ -164,9 +306,11 @@ def detect(base_path, pre_walk=None):
 def find_settings_xml(base_dir):
     """Search for the settings.xml file in the base directory.
 
-    :param base_dir: Base directory of data set
+    Args:
+        base_dir: Base directory of data set
 
-    :return: Path to settings.xml relative to base_dir
+    Returns:
+        Path to settings.xml relative to base_dir
     """
     _, dirs, files = tools.path_content(base_dir)
     if "settings.xml" in files:
@@ -183,58 +327,79 @@ def _fpga_node(chain_dict):
         chain_dict: Root directory of data set.
 
     Returns:
-        string of NodeID (e.g. '106')
+        string of NodeID (e.g. '100')
     """
-    # chain = config_xml(base_dir)['SIGNALCHAIN']
     nodes = [p['attrib']['NodeId'] for p in chain_dict if p['type'] == 'PROCESSOR' and 'FPGA' in p['attrib']['name']]
-    logger.info('Found FPGA node(s): {}'.format(nodes))
+    logger.debug('Found FPGA node(s): {}'.format(nodes))
     if len(nodes) == 1:
         return nodes[0]
     if len(nodes) > 1:
-        raise BaseException('Multiple FPGA nodes found. (Good on you!) {}'.format(nodes))
+        raise BaseException('Multiple FPGA nodes found. (Good on you though!) {}'.format(nodes))
     else:
         raise BaseException('Node ID not found in xml dict {}'.format(chain_dict))
 
 
-def config(base_dir, *args, **kwargs):
-    """Get recording/data set configuration from open ephys GUI settings.xml file and the header
-    of files from the data set
+def metadata_from_target(target_dir, channel_type='CH'):
+    """Get metadata from directory containing .continuous files. Directories may contain multiple "subsets"
+    of recordings that may have been acquired at different points in time. Stupid.
 
     Args:
-        base_dir: path to the data set
+        target_dir: path to the data set
+        channel_type: AUX, CH or ADC. Default: 'CH'
 
     Returns:
-        Dictionary with configuration entries. (INFO, SIGNALCHAIN, HEADER, AUDIO, FPGA_NODE)"""
-    cfg = config_xml(base_dir)
-    cfg['FPGA_NODE'] = _fpga_node(cfg['SIGNALCHAIN'])
-    cfg['HEADER'] = config_header(base_dir, cfg['FPGA_NODE'])
-    cfg['DTYPE'] = DEFAULT_DTYPE
+        Dictionary with configuration entries. (DTYPE, INFO, SIGNALCHAIN, SUBSETS, AUDIO, FPGA_NODE)
+    """
+    metadata = {'DTYPE': DEFAULT_DTYPE,
+                'TARGET': str(Path(target_dir).resolve())}
 
-    if 'n_channels' not in kwargs or kwargs['n_channels'] is None:
-        logger.warning('Channel number not given. Defaulting to 64.'.format(base_dir))
-        n_channels = guess_n_channels(base_dir, cfg['FPGA_NODE'])
-        # logger.warning('{} seems to have {} channels'.format(base_dir, n_channels))
-    else:
-        n_channels = kwargs['n_channels']
+    # Grab metadata from the settings.xml file in the base directory
+    metadata.update(metadata_from_xml(target_dir))
 
-    cfg['CHANNELS'] = {'n_channels': n_channels}
-    return cfg
+    logger.debug('Searching FPGA node in signal chain')
+    metadata['FPGA_NODE'] = _fpga_node(metadata['SIGNALCHAIN'])
+
+    metadata['CHANNEL_TYPE'] = channel_type
+
+    metadata['SUBSETS'] = gather_files(target_dir, metadata['FPGA_NODE'], channel_type=channel_type)
+
+    logger.debug(pformat(metadata, indent=2))
+
+    for sub_id, sub_dict in metadata['SUBSETS'].items():
+        metadata['SUBSETS'][sub_id]['HEADER'] = metadata_from_files(sub_dict['FILES'])
+
+    # Check that all headers are the same, then use the set.
+
+    # if 'n_channels' not in kwargs or kwargs['n_channels'] is None:
+    #     logger.warning('Channel number not given. Defaulting to 64.'.format(target_dir))
+    #     n_channels = guess_n_channels(target_dir, md['FPGA_NODE'])
+    # else:
+    #     n_channels = kwargs['n_channels']
+    #
+    # md['CHANNELS'] = {'n_channels': n_channels}
+    return metadata
 
 
-def config_header(base_dir, fpga_node='106'):
-    """Reads header information from open ephys .continuous files in target path.
-    This returns some "reliable" information about the sampling rate."""
-    # Data file header (reliable sampling rate information)
-    # FIXME: Make sure all headers agree...
-    file_name = os.path.join(base_dir, '{}_CH1_0.continuous'.format(fpga_node))
-    header = read_header(file_name)
+def metadata_from_file(file):
+    """Read metadata of single .continuous file header/file stats. Checks if the file contains
+    complete records based on the size of the file as header size + integer multiples of records.
+
+    Args:
+        file: Path to .continuous file
+
+    Returns:
+        Dictionary with n_blocks, block_size, n_samples, sampling_rate fields.
+    """
+    header = read_header(file)
     fs = header['sampleRate']
-    n_samples = int(os.path.getsize(file_name) - SIZE_HEADER)
-    n_blocks = n_samples / SIZE_RECORD
-    assert n_samples % SIZE_RECORD == 0
+    n_record_bytes = int(os.path.getsize(file) - SIZE_HEADER)
+    n_blocks = n_record_bytes / SIZE_RECORD
+    if n_record_bytes % SIZE_RECORD != 0:
+        raise ValueError('File {} contains incomplete records!'.format(file))
 
-    logger.info('Fs = {:.2f}Hz, {} blocks, {} samples, {}'
-                .format(fs, n_blocks, n_samples, tools.fmt_time(n_samples / fs)))
+    n_samples = n_record_bytes - n_blocks * (SIZE_RECORD - SIZE_DATA)
+    logger.info('{}, Fs = {:.2f}Hz, {} blocks, {} samples, {}'
+                .format(file, fs, n_blocks, n_samples, tools.fmt_time(n_samples / fs)))
 
     return dict(n_blocks=int(n_blocks),
                 block_size=NUM_SAMPLES,
@@ -242,8 +407,46 @@ def config_header(base_dir, fpga_node='106'):
                 sampling_rate=fs)
 
 
-def config_xml(base_dir):
-    """Reads Open Ephys XML settings file and returns dictionary with relevant information.
+def metadata_from_files(files):
+    """Reads header information from open ephys .continuous files.
+    This returns some "reliable" information of what the acquisition system thinks went down.
+
+    Args:
+        files: List of files
+
+    Returns:
+        Dictionary with n_blocks, block_size, n_samples, sampling_rate fields
+    """
+    logger.debug('Extracting metadata from {} files... '.format(len(files)))
+    metadata_list = [metadata_from_file(f) for f in files]
+    files_metadata = reduce_files_metadata(metadata_list)
+    if files_metadata is None:
+        raise AssertionError
+
+
+def reduce_files_metadata(metadata_list):
+    """Check that length, sampling rate, buffer and block sizes of given files are consistent.
+
+    Args:
+        metadata_list: List of metadata dictionaries extracted from file headers/file stats
+
+    Returns:
+        Set of metadata when all metadata are the same for all items in the list.
+    """
+    if not len(metadata_list):
+        raise ValueError("List of metadata empty, can't check nothin' not.")
+
+    md_sets = {k: set([md[k] for md in metadata_list]) for k in metadata_list[0].keys()}
+    if not all([len(mdl) == 1 for mdl in md_sets.values()]):
+        logging.error(md_sets)
+        raise ValueError('Found non-matching metadata in list of files!')
+    md = {k: tuple(v)[0] for k, v in md_sets.items()}
+    print(md)
+    return md
+
+
+def metadata_from_xml(base_dir):
+    """Reads Open Ephys settings.xml file and returns dictionary with relevant information.
         - Info field
             Dict(GUI version, date, OS, machine),
         - Signal chain
@@ -252,7 +455,7 @@ def config_xml(base_dir):
             but the order of assembling the chain.
         - Audio
             Int bufferSize
-        - Header
+        - Header (NOT from XML, but from data files)
             Dict(data from a single file header, i.e. sampling rate, blocks, etc.)
 
     Args:
@@ -261,9 +464,9 @@ def config_xml(base_dir):
     Returns:
         Dict{INFO, SIGNALCHAIN, AUDIO, HEADER}
     """
-
-    # Settings.xml file
+    logger.debug('Looking for settings.xml in {} ...'.format(base_dir))
     xml_path = find_settings_xml(base_dir)
+    logger.debug('Found. Reading in xml metadata...')
     root = ETree.parse(xml_path).getroot()
 
     # Recording system information
@@ -281,92 +484,13 @@ def config_xml(base_dir):
     # Audio settings
     audio = root.find('AUDIO').attrib
 
-    return dict(INFO=info,
-                SIGNALCHAIN=chain,
-                AUDIO=audio)
+    md = dict(INFO=info, SIGNALCHAIN=chain, AUDIO=audio)
+    logger.debug('Got: {}'.format(pformat(md, indent=2)))
+    return md
 
 
 def guess_n_channels(base_path, fpga_node, *args, **kwargs):
+    """What was I thinking?"""
     # FIXME: Hardcoding. Poor man's features.
-    return 64
-
-
-# # data type of individual records, n Bytes
-# # (2048 + 22) Byte = 2070 Byte total typically if full 1024 samples
-# def data_dt(num_samples=NUM_SAMPLES):
-#     return np.dtype([('timestamp', np.int64),  # 8 Byte
-#                      ('n_samples', np.uint16),  # 2 Byte
-#                      ('rec_num', np.uint16),  # 2 Byte
-#                      ('samples', ('>i2', num_samples)),  # 2 Byte each x 1024 typ.
-#                      ('rec_mark', (np.uint8, len(REC_MARKER)))])  # 10 Byte
-# class ContinuousFile:
-#     """Single .continuous file. Generates chunks of data."""
-#
-#     # TODO: Allow record counts and offsets
-#
-#     def __init__(self, path):
-#         self.path = op.abspath(op.expanduser(path))
-#         self.file_size = op.getsize(self.path)
-#         # Make sure we have full records all the way through
-#         assert (self.file_size - SIZE_HEADER) % SIZE_RECORD == 0
-#         self.num_records = (self.file_size - SIZE_HEADER) // SIZE_RECORD
-#         self.duration = self.num_records
-#
-#     def __enter__(self):
-#         self.header = self._read_header()
-#         self.record_dtype = data_dt(self.header['blockLength'])
-#         self.__fid = open(self.path, 'rb')
-#         self.__fid.seek(SIZE_HEADER)
-#         return self
-#
-#     def _read_header(self):
-#         return fmt_header(np.fromfile(self.path, dtype=header_dt(), count=1))
-#
-#     def read_record(self, count=1):
-#         buf = np.fromfile(self.__fid, dtype=self.record_dtype, count=count)
-#
-#         # make sure offsets are likely correct
-#         assert np.array_equal(buf[0]['rec_mark'], REC_MARKER)
-#         return buf['samples'].reshape(-1)
-#
-#     def next(self):
-#         return self.read_record() if self.__fid.tell() < self.file_size else None
-#
-#     def __exit__(self, *args):
-#         self.__fid.close()
-
-class ContinuousFile:
-    """Single .continuous file. Generates chunks of data."""
-
-    # TODO: Allow record counts and offsets
-
-    def __init__(self, path):
-        self.path = os.path.abspath(os.path.expanduser(path))
-        self.file_size = os.path.getsize(self.path)
-        # Make sure we have full records all the way through
-        assert (self.file_size - SIZE_HEADER) % SIZE_RECORD == 0
-        self.num_records = (self.file_size - SIZE_HEADER) // SIZE_RECORD
-        self.duration = self.num_records
-
-    def __enter__(self):
-        self.header = self._read_header()
-        self.record_dtype = DATA_DT  # data_dt(self.header['blockLength'])
-        self.__fid = open(self.path, 'rb')
-        self.__fid.seek(SIZE_HEADER)
-        return self
-
-    def _read_header(self):
-        return fmt_header(np.fromfile(self.path, dtype=HEADER_DT, count=1))
-
-    def read_record(self, count=1):
-        buf = np.fromfile(self.__fid, dtype=self.record_dtype, count=count)
-
-        # make sure offsets are likely correct
-        assert np.array_equal(buf[0]['rec_mark'], REC_MARKER)
-        return buf['samples'].reshape(-1)
-
-    def next(self):
-        return self.read_record() if self.__fid.tell() < self.file_size else None
-
-    def __exit__(self, *args):
-        self.__fid.close()
+    raise NotImplemented
+    # return 64
