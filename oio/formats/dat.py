@@ -114,7 +114,7 @@ def guess_sampling_rate(arr):
     return DEFAULT_SAMPLING_RATE
 
 
-def config(base_path, *args, **kwargs):
+def metadata(base_path, *args, **kwargs):
     if 'dtype' not in kwargs or kwargs['dtype'] is None:
         dtype = DEFAULT_DTYPE
         guess_dtype(base_path)

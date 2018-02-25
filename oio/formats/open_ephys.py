@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from pprint import pformat
 
+LOG_LEVEL_VERBOSE = 5
+
 FMT_NAME = 'OE'
 FMT_FEXT = '.continuous'
 
@@ -200,23 +202,22 @@ def gather_files(target_directory, proc_node, channels='*', channel_type='CH',
     return files
 
 
-# def check_headers(files):
-#     """Check that length, sampling rate, buffer and block sizes of a list of open-ephys ContinuousFiles are
-#     identical and return them in that order."""
-#     # FIXME: Not clear enough this reads only from ContinuousFiles, not raw file paths
-#     raise NotImplemented
-#     # # Check oe_file make sense (same size, same sampling rate, etc.
-#     # num_records = [f.num_records for f in files]
-#     # sampling_rates = [f.header['sampleRate'] for f in files]
-#     # buffer_sizes = [f.header['bufferSize'] for f in files]
-#     # block_sizes = [f.header['blockLength'] for f in files]
-#     #
-#     # assert len(set(num_records)) == 1
-#     # assert len(set(sampling_rates)) == 1
-#     # assert len(set(buffer_sizes)) == 1
-#     # assert len(set(block_sizes)) == 1
-#     #
-#     # return num_records[0], sampling_rates[0], buffer_sizes[0], block_sizes[0]
+def check_continuous_headers(files):
+    """Check that length, sampling rate, buffer and block sizes of a list of open-ephys ContinuousFiles are
+    identical and return them in that order."""
+    # FIXME: Not clear enough this reads only from ContinuousFiles, not raw file paths
+    # Check oe_file make sense (same size, same sampling rate, etc.
+    num_records = [f.num_records for f in files]
+    sampling_rates = [f.header['sampleRate'] for f in files]
+    buffer_sizes = [f.header['bufferSize'] for f in files]
+    block_sizes = [f.header['blockLength'] for f in files]
+
+    assert len(set(num_records)) == 1
+    assert len(set(sampling_rates)) == 1
+    assert len(set(buffer_sizes)) == 1
+    assert len(set(block_sizes)) == 1
+
+    return num_records[0], sampling_rates[0], buffer_sizes[0], block_sizes[0]
 
 
 # def fill_buffer(target, buffer, offset, *args, **kwargs):
@@ -368,16 +369,13 @@ def metadata_from_target(target_dir, channel_type='CH'):
             channel_metadata.update(metadata_from_file(channel_metadata['FILEPATH']))
         metadata['SUBSETS'][sub_id]['JOINT_HEADERS'] = reduce_files_metadata(metadata['SUBSETS'][sub_id]['FILES'])
 
-    # Check that all headers are the same, then use the set.
+    logger.log(level=LOG_LEVEL_VERBOSE, msg=pformat(metadata, indent=2))
 
-    # if 'n_channels' not in kwargs or kwargs['n_channels'] is None:
-    #     logger.warning('Channel number not given. Defaulting to 64.'.format(target_dir))
-    #     n_channels = guess_n_channels(target_dir, md['FPGA_NODE'])
-    # else:
-    #     n_channels = kwargs['n_channels']
-    #
-    # md['CHANNELS'] = {'n_channels': n_channels}
-    logger.debug(pformat(metadata, indent=2))
+    # Channels should be the same for all subsets
+    channels = sorted(set([ch for sub_id in metadata['SUBSETS']
+                           for ch in metadata['SUBSETS'][sub_id]['JOINT_HEADERS']['CHANNEL']]))
+    metadata['CHANNELS'] = channels
+
     return metadata
 
 
@@ -399,30 +397,13 @@ def metadata_from_file(file):
         raise ValueError('File {} contains incomplete records!'.format(file))
 
     n_samples = n_record_bytes - n_blocks * (SIZE_RECORD - SIZE_DATA)
-    logger.info('{}, Fs = {:.2f}Hz, {} blocks, {} samples, {}'
-                .format(file, fs, n_blocks, n_samples, tools.fmt_time(n_samples / fs)))
+    logger.log(level=LOG_LEVEL_VERBOSE, msg='{}, Fs = {:.2f}Hz, {} blocks, {} samples, {}'
+               .format(file, fs, n_blocks, n_samples, tools.fmt_time(n_samples / fs)))
 
     return dict(n_blocks=int(n_blocks),
                 block_size=NUM_SAMPLES,
                 n_samples=int(n_samples),
                 sampling_rate=fs)
-
-#
-# def metadata_from_files(files):
-#     """Reads header information from open ephys .continuous files.
-#     This returns some "reliable" information of what the acquisition system thinks went down.
-#
-#     Args:
-#         files: List of files
-#
-#     Returns:
-#         Dictionary with n_blocks, block_size, n_samples, sampling_rate fields
-#     """
-#     logger.debug('Extracting metadata from {} files... '.format(len(files)))
-#     metadata_list = [metadata_from_file(f) for f in files]
-#     files_metadata = reduce_files_metadata(metadata_list)
-#     if files_metadata is None:
-#         raise AssertionError
 
 
 def reduce_files_metadata(files_metadata):
@@ -493,7 +474,7 @@ def metadata_from_xml(base_dir):
     audio = root.find('AUDIO').attrib
 
     md = dict(INFO=info, SIGNALCHAIN=chain, AUDIO=audio)
-    logger.debug('Got: {}'.format(pformat(md, indent=2)))
+    logger.log(level=LOG_LEVEL_VERBOSE, msg='Got: {}'.format(pformat(md, indent=2)))
     return md
 
 

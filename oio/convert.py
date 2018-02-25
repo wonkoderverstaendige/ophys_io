@@ -14,7 +14,7 @@ import os.path as op
 from contextlib import ExitStack
 
 import numpy as np
-import oio.open_ephys_io as oe
+import oio.open_ephys_io_deprecated as oe
 from oio.util import fmt_time
 
 LOG_STR_INPUT = '==> Input: {path}'
