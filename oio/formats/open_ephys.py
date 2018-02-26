@@ -179,6 +179,7 @@ def gather_files(target_directory, proc_node, channels='*', channel_type='CH',
     globbed_sub_ids, globbed_channels = map(tuple, map(set, zip(*[_ids_from_fname(f, channel_type) for f in globbed])))
     logger.debug('Found sub ids: {}, channels: {}'.format(globbed_sub_ids, globbed_channels))
 
+    globbed_channels = [g - 1 for g in globbed_channels]
     # override sub_id search space to singular instance if we aren't scanning them all
     if not scan_sub_ids:
         if sub_id not in globbed_sub_ids:
@@ -189,7 +190,7 @@ def gather_files(target_directory, proc_node, channels='*', channel_type='CH',
     for sid in sorted(globbed_sub_ids):
         sub_files = {}
         for channel in sorted(globbed_channels):
-            filename = template.format(proc_node=proc_node, channel=channel, channel_type=channel_type,
+            filename = template.format(proc_node=proc_node, channel=channel + 1, channel_type=channel_type,
                                        sub_id='' if sid is -1 else '_{}'.format(sid))
             file_path = target_path / filename
             # Check file existence
@@ -197,7 +198,7 @@ def gather_files(target_directory, proc_node, channels='*', channel_type='CH',
                 raise FileNotFoundError('Sub_ids and channels not matching up at {}'.format(file_path))
 
             sub_files[channel] = {'PROC_NODE': proc_node, 'CHANNEL_TYPE': channel_type, 'CHANNEL': channel,
-                                  'FILEPATH': str(file_path), 'FILENAME': filename}
+                                      'FILEPATH': str(file_path), 'FILENAME': filename}
         files[sid] = {'FILES': sub_files}
     return files
 
