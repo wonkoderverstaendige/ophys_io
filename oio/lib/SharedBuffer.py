@@ -151,7 +151,7 @@ class SharedBuffer:
         """
         # FIXME: Detect which case to use based on the shape of the data
         # should update the whole array at once
-        logger.debug('Putting data of shape {} at start {}'.format(data.shape, start))
+        # logger.debug('Putting data of shape {} at start {}'.format(data.shape, start))
         if len(data.shape) != 1:
             if data.shape != self.buffer.shape:
                 raise SharedBufferError(4)

@@ -10,11 +10,13 @@ Stream data to buffer
 import logging
 import multiprocessing as mp
 import signal
-import time
+from time import time, sleep
 from oio.lib.SharedBuffer import SharedBuffer
+from queue import Empty
 
 
 logger = logging.getLogger('Streamer')
+TIMEOUT = 5
 
 
 class Streamer(mp.Process):
@@ -31,10 +33,12 @@ class Streamer(mp.Process):
 
         # # Queue Interface
         self.commands = {'stop': self.stop,
-                         'offset': self.reposition}
+                         'offset': self.reposition,
+                         'heartbeat': self.heartbeat}
         self.queue = queue
         self.alive = True
         self.update_interval = update_interval
+        self.last_update = time()
 
         # Shared Buffer
         self.raw = raw
@@ -45,13 +49,19 @@ class Streamer(mp.Process):
 
     def run(self):
         """Main streaming loop."""
-        # ignore CTRL+C, runs daemonic, will stop with parent
+        # ignore CTRL+C, runs daemonic, will stop with parent or on heartbeat timeout
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         logger.debug('Running...')
 
         self.buffer.initialize_from_raw(self.raw)
+        self.last_update = time()
 
         while self.alive:
+            if time() - self.last_update > 5:
+                logger.error('Streamer exit on timeout: {}'.format(time()-self.last_update))
+                self.alive = False
+                break
+
             # Grab all messages currently in the queue
             instructions = self.__get_instructions()
             stop = 'stop' in [instr[0] for instr in instructions]
@@ -69,8 +79,13 @@ class Streamer(mp.Process):
                     self.stop(None)
                     break
                 self.__execute_instruction(instr)
-            logger.debug('Instructions: {}'.format(instructions))
-            time.sleep(self.update_interval)
+            else:
+                for instr in [instr for instr in instructions if instr[0] != 'heartbeat']:
+                    logger.debug('Instructions: {}'.format(instr))
+            sleep(self.update_interval)
+
+    def heartbeat(self, t):
+        self.last_update = t
 
     def stop(self, _):
         logger.debug('Received Stop Signal')
@@ -81,22 +96,21 @@ class Streamer(mp.Process):
 
     def __get_instructions(self):
         cmdlets = []
-        for msg in range(0, self.queue.qsize()):
+        while self.queue.qsize():
             try:
                 cmdlets.append(self.queue.get(False))
-            except Exception as e:
-                logger.error(e)
+            except Empty:
+                # logger.debug('Queue empty!')
                 break
+
         return cmdlets
 
     def __execute_instruction(self, instruction):
         if len(instruction) == 2 and instruction[0] in self.commands:
-            try:
-                self.commands[instruction[0]](instruction[1])
-            except BaseException as e:
-                logger.warning('Unable to execute {} because: {}'.format(instruction, e))
+            self.commands[instruction[0]](instruction[1])
+            # logger.warning('Unable to execute {} because: {}'.format(instruction, e))
         else:
-            logger.warning('Ignoring {}'.format(instruction))
+            logger.warning('Ignoring invalid instruction {}'.format(instruction))
 
     def __add_command(self, command, func):
         self.commands[command] = func

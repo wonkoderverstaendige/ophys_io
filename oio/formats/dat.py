@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 class DataStreamer(Streamer.Streamer):
-    def __init__(self, target_path, config, *args, **kwargs):
+    def __init__(self, target_path, metadata, *args, **kwargs):
         super(DataStreamer, self).__init__(*args, **kwargs)
         self.target_path = target_path
         self.dtype = np.dtype('int16')
         logger.debug('DAT-File Streamer Initialized at {}!'.format(target_path))
-        self.cfg = config
+        self.cfg = metadata
 
     def reposition(self, offset):
         logger.debug('Rolling to position {}'.format(offset))
@@ -114,7 +114,7 @@ def guess_sampling_rate(arr):
     return DEFAULT_SAMPLING_RATE
 
 
-def metadata(base_path, *args, **kwargs):
+def metadata_from_target(base_path, *args, **kwargs):
     if 'dtype' not in kwargs or kwargs['dtype'] is None:
         dtype = DEFAULT_DTYPE
         guess_dtype(base_path)

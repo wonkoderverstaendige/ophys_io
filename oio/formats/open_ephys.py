@@ -81,27 +81,22 @@ class ContinuousFile:
 
 
 class DataStreamer(Streamer.Streamer):
-    def __init__(self, target_path, config, *args, **kwargs):
+    def __init__(self, target_path, metadata, *args, **kwargs):
         super(DataStreamer, self).__init__(*args, **kwargs)
         self.target_path = target_path
         logger.debug('Open Ephys Streamer Initialized at {}!'.format(target_path))
-        self.cfg = config
-        self.files = None
+        self.metadata = metadata
+        logger.warning('Only traversing first subset of files!')
+        first_subset = next(iter(self.metadata['SUBSETS'].values()))
+        self.files = first_subset['FILES']
 
     def reposition(self, offset):
         logger.debug('Rolling to position {}'.format(offset))
-        # dtype = np.dtype(self.buffer.np_type)
         n_samples = self.buffer.buffer.shape[1]
 
-        channels = range(self.buffer.n_channels)
-        self.files = [
-            (channel, os.path.join(self.target_path, NAME_TEMPLATE.format(self.cfg['FPGA_NODE'], channel + 1)))
-            for
-            channel in channels]
-
-        for sf in self.files:
-            data = read_record(sf[1], offset=offset)[:n_samples]
-            self.buffer.put_data(data, channel=sf[0])
+        for ch, ch_dict in self.files.items():
+            data = read_record(ch_dict['FILEPATH'], offset=offset)[:n_samples]
+            self.buffer.put_data(data, channel=ch)
 
 
 def _ids_from_fname(fn, channel_type='CH'):
@@ -341,7 +336,7 @@ def _fpga_node(chain_dict):
         raise BaseException('Node ID not found in xml dict {}'.format(chain_dict))
 
 
-def metadata_from_target(target_dir, channel_type='CH'):
+def metadata_from_target(target_dir, channel_type='CH', *args, **kwargs):
     """Get metadata from directory containing .continuous files. Directories may contain multiple "subsets"
     of recordings that may have been acquired at different points in time. Stupid.
 
